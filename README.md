@@ -1,5 +1,19 @@
 # Window Columns
 
+<p align="center">
+  <img src="Resources/AppIcon-v3-Light.png" alt="Window Columns logo" width="160">
+</p>
+
+<p align="center">
+  <a href="https://github.com/maskilx/window-columns/releases/download/v0.1.0-beta.1/Window-Columns-v0.1.0-beta.1-macos-arm64.zip">
+    <img src="https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-007AFF?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="Download Window Columns for macOS (Apple Silicon)">
+  </a>
+</p>
+
+<p align="center">
+  <sub>First launch: if Gatekeeper blocks this unnotarised beta, right-click the app and choose <strong>Open</strong>, or run <code>xattr -cr "/Applications/Window Columns.app"</code>.</sub>
+</p>
+
 [![Public beta](https://img.shields.io/badge/status-public_beta-orange)](CHANGELOG.md)
 [![CI](https://github.com/maskilx/window-columns/actions/workflows/ci.yml/badge.svg)](https://github.com/maskilx/window-columns/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -53,12 +67,44 @@ extract it, and move **Window Columns.app** to `/Applications`.
 
 The prebuilt beta is arm64-only. Intel Mac users should build from source.
 
+> [!IMPORTANT]
+> **First launch: this beta is not notarised.** After moving the app to
+> `/Applications`, bypass Gatekeeper using either of these methods:
+>
+> 1. In Finder, Control-click or right-click **Window Columns.app**, choose
+>    **Open**, then confirm **Open**. This is only required on the first launch.
+> 2. Alternatively, remove the downloaded app's quarantine attributes in
+>    Terminal, then open it normally:
+>
+>    ```sh
+>    xattr -cr "/Applications/Window Columns.app"
+>    ```
+>
+> Only do this after downloading from the official release and verifying its
+> SHA-256 checksum. The command recursively removes extended attributes from
+> this app bundle.
+
 The beta bundle is ad-hoc signed and **not notarised by Apple**. macOS will warn
 the first time it opens. Review the source and attached SHA-256 checksum before
-running it. If you accept the risk, use Finder's **Open** contextual command; on
-systems that still block it, macOS exposes **Open Anyway** in **System Settings
-→ Privacy & Security** after the first launch attempt. Building from source
-remains the most transparent installation path.
+running it. Building from source remains the most transparent installation
+path.
+
+### Homebrew cask (draft)
+
+The repository includes an arm64-only draft cask in
+[`Casks/window-columns.rb`](Casks/window-columns.rb). Until a dedicated tap or
+official Homebrew integration is available, install it directly from this
+repository as a personal tap:
+
+```sh
+brew tap maskilx/window-columns https://github.com/maskilx/window-columns
+brew install --cask maskilx/window-columns/window-columns
+```
+
+Homebrew installs **Window Columns.app** into `/Applications`. The downloaded
+beta remains unnotarised, so follow the first-launch instructions above if
+Gatekeeper blocks it. This cask is pinned to `v0.1.0-beta.1`; later releases
+must update its version, URL and checksum before publication.
 
 ### Build from source
 
