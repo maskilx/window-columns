@@ -1,0 +1,55 @@
+name: Bug report
+description: Report reproducible incorrect behaviour in the public beta
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing Window Columns. Do not include vulnerability details here; use the private security reporting link instead.
+  - type: input
+    id: version
+    attributes:
+      label: Window Columns version
+      description: Release tag or commit hash. The current beta version is in the VERSION file.
+      placeholder: 0.1.0-beta.1
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS and hardware
+      placeholder: macOS 26.0, Apple silicon
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the observed behaviour and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create a group with…
+        2. Open…
+        3. Select…
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Include relevant applications, window types, displays, Spaces, logs, screenshots, or a minimal sample. Remove private window titles first.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: This report does not contain security-sensitive or private information.
+          required: true

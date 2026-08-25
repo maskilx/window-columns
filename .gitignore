@@ -1,0 +1,24 @@
+# Build output
+.build/
+dist/
+DerivedData/
+.swiftpm/
+
+# The build script drops a convenience symlink to the installed app here, and
+# Finder may leave numbered duplicates of it.
+Window Columns*.app
+
+# macOS / editor noise
+.DS_Store
+*.xcuserstate
+.idea/
+.vscode/
+
+# Local configuration and signing material
+.env
+.env.*
+!.env.example
+*.cer
+*.key
+*.p12
+*.pem
