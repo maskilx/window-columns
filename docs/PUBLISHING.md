@@ -70,4 +70,6 @@ gh repo edit maskilx/window-columns \
 ## Publish the beta tag
 
 Follow [RELEASING.md](RELEASING.md), then mark the GitHub release as a
-prerelease. The beta is source-only; do not attach the locally signed app bundle.
+prerelease. If a beta app bundle is attached, it must be freshly built from the
+tagged commit, ad-hoc signed, clearly described as unnotarised, and accompanied
+by a SHA-256 checksum.

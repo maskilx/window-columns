@@ -31,4 +31,5 @@ cannot promise a fixed response-time service level.
 Window Columns requires macOS Accessibility permission to inspect and control
 windows. Window thumbnails additionally require optional Screen Recording
 permission. Review [PRIVACY.md](PRIVACY.md) for the exact data and permission
-use. Source releases are not notarised; build only revisions you trust.
+use. Prebuilt beta bundles are ad-hoc signed and are not notarised; verify the
+attached checksum or build a revision you trust from source.

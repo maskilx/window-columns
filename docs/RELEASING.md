@@ -28,8 +28,16 @@ property lists contain the numeric base version, while `CFBundleGetInfoString`,
 7. Create a GitHub prerelease from the tag. Use the matching changelog section
    as release notes and keep **Set as a pre-release** enabled.
 
-## Distribution policy during beta
+## Binary distribution during beta
 
-Publish source archives only. Do not attach a `.app` bundle until it has a
-Developer ID signature, notarisation, a documented update path, and verification
-on the supported macOS range.
+A beta `.app` bundle may be attached only when all of the following are true:
+
+- it is freshly built from the tagged commit with `CONFIGURATION=release`;
+- its bundle version matches `VERSION` and its nested signatures verify;
+- it is zipped with macOS metadata preserved and has an attached SHA-256 file;
+- the release is marked as a prerelease; and
+- the release notes clearly state that it is ad-hoc signed, unnotarised, and may
+  be blocked by Gatekeeper.
+
+Replace this process with Developer ID signing and notarisation before calling a
+binary release stable.
