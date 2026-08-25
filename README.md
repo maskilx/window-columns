@@ -15,6 +15,8 @@ window manager, no background polling.
 > and used on macOS 26 on Apple silicon, but has not yet been tested across the
 > full macOS 13+ support range. Expect rough edges and please report them.
 
+![Window Columns demonstration showing window selection, connected columns, and group restoration](docs/assets/window-columns-demo.gif)
+
 ## What it does
 
 Pick two or more windows in the chooser and they become a **group**: tiled
