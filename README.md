@@ -44,9 +44,12 @@ at a time.
 
 ### Prebuilt beta
 
-Download `Window-Columns-v0.1.0-beta.1.zip` from the
+On an Apple silicon Mac, download
+`Window-Columns-v0.1.0-beta.1-macos-arm64.zip` from the
 [v0.1.0-beta.1 prerelease](https://github.com/maskilx/window-columns/releases/tag/v0.1.0-beta.1),
 extract it, and move **Window Columns.app** to `/Applications`.
+
+The prebuilt beta is arm64-only. Intel Mac users should build from source.
 
 The beta bundle is ad-hoc signed and **not notarised by Apple**. macOS will warn
 the first time it opens. Review the source and attached SHA-256 checksum before

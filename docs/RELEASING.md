@@ -35,6 +35,7 @@ A beta `.app` bundle may be attached only when all of the following are true:
 - it is freshly built from the tagged commit with `CONFIGURATION=release`;
 - its bundle version matches `VERSION` and its nested signatures verify;
 - it is zipped with macOS metadata preserved and has an attached SHA-256 file;
+- the asset name identifies its platform and architecture;
 - the release is marked as a prerelease; and
 - the release notes clearly state that it is ad-hoc signed, unnotarised, and may
   be blocked by Gatekeeper.
