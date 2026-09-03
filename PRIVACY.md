@@ -26,9 +26,18 @@ the app's Accessibility identity stable across local rebuilds.
 
 ## Network and analytics
 
-The application contains no analytics, advertising, telemetry, update service,
-or application-level network client. It does not transmit window metadata,
-previews, preferences, or saved groups.
+The application contains no analytics, advertising, telemetry, or background update service.
+
+### Optional AI Group Naming
+
+If you choose to enter an optional Google Gemini API key in Settings and click
+**Suggest Names**, the app sends only the application names and window titles of the
+windows in your active groups to Google's Gemini API (`generativelanguage.googleapis.com`)
+to generate single-word group names.
+
+This feature is completely opt-in and user-initiated. No network calls are made
+without clicking "Suggest Names". If no API key is set, names are generated locally on
+your device using heuristics with zero network connectivity.
 
 GitHub is involved only when you independently visit this repository or use
 GitHub features; GitHub's own privacy terms then apply.
