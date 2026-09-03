@@ -6,14 +6,11 @@ import ServiceManagement
 final class AppModel: ObservableObject {
     static let shared = AppModel()
     @Published private(set) var hasActiveLayout = false
-    @Published private(set) var pickingTarget: Int?
-    @Published private(set) var pickedCount = 0
     /// Shortcuts macOS or another application refused to hand over.
     @Published private(set) var rejectedShortcuts: [String] = []
     let coordinator: WindowCoordinator
     let store: LayoutStore
     private let hotKeys = HotKeyManager()
-    private var picker: WindowPicker?
     var showCreateGroup: (() -> Void)?
     var showChooser: (() -> Void)?
 
@@ -43,15 +40,6 @@ final class AppModel: ObservableObject {
         }
         rejectedShortcuts = hotKeys.apply(store.preferences)
         applyAppearance(store.preferences.appearance)
-
-        picker = WindowPicker(
-            coordinator: coordinator,
-            onUpdate: { [weak self] count in self?.pickedCount = count },
-            onFinish: { [weak self] _ in
-                self?.pickingTarget = nil
-                self?.pickedCount = 0
-            }
-        )
     }
 
     func updateGap(_ value: Double) {
@@ -78,23 +66,38 @@ final class AppModel: ObservableObject {
         store.preferences.showWindowPreviews = enabled
     }
 
-    func startPicking(count: Int) {
-        pickingTarget = count
-        pickedCount = 0
-        picker?.start(count: count)
+    var switcherDesignStyle: SwitcherDesignStyle {
+        store.preferences.switcherDesignStyle
     }
 
-    func cancelPicking() {
-        picker?.cancel()
+    func setSwitcherDesignStyle(_ style: SwitcherDesignStyle) {
+        store.preferences.switcherDesignStyle = style
+        objectWillChange.send()
+    }
+
+    var geminiAPIKey: String {
+        get { store.preferences.geminiAPIKey ?? "" }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            store.preferences.geminiAPIKey = trimmed.isEmpty ? nil : trimmed
+            objectWillChange.send()
+        }
+    }
+
+    func setShowDockIcon(_ enabled: Bool) {
+        store.preferences.showDockIcon = enabled
+        let targetPolicy: NSApplication.ActivationPolicy = enabled ? .regular : .accessory
+        if NSApp.activationPolicy() != targetPolicy {
+            NSApp.setActivationPolicy(targetPolicy)
+        }
     }
 
     private func setLayoutActive(_ active: Bool) {
         guard hasActiveLayout != active else { return }
         hasActiveLayout = active
-        // Individual group companions provide the Command-Tab entries. The controller
-        // itself remains a lightweight menu-bar app so it doesn't add a duplicate tile.
-        if NSApp.activationPolicy() != .accessory {
-            NSApp.setActivationPolicy(.accessory)
+        let targetPolicy: NSApplication.ActivationPolicy = store.preferences.showDockIcon ? .regular : .accessory
+        if NSApp.activationPolicy() != targetPolicy {
+            NSApp.setActivationPolicy(targetPolicy)
         }
     }
 

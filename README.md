@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/maskilx/window-columns/releases/download/v0.1.0-beta.1/Window-Columns-v0.1.0-beta.1-macos-arm64.zip">
+  <a href="https://github.com/maskilx/window-columns/releases/download/v0.1.0-beta.2/Window-Columns-v0.1.0-beta.2-macos-arm64.zip">
     <img src="https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-007AFF?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="Download Window Columns for macOS (Apple Silicon)">
   </a>
 </p>
@@ -25,7 +25,7 @@ entry so you can switch to a whole set of windows at once.
 It uses the Accessibility API directly — no scripting bridge, no third-party
 window manager, no background polling.
 
-> **Public beta:** the current source release is **0.1.0-beta.1**. It is built
+> **Public beta:** the current source release is **0.1.0-beta.2**. It is built
 > and used on macOS 26 on Apple silicon, but has not yet been tested across the
 > full macOS 13+ support range. Expect rough edges and please report them.
 
@@ -61,8 +61,8 @@ at a time.
 ### Prebuilt beta
 
 On an Apple silicon Mac, download
-`Window-Columns-v0.1.0-beta.1-macos-arm64.zip` from the
-[v0.1.0-beta.1 prerelease](https://github.com/maskilx/window-columns/releases/tag/v0.1.0-beta.1),
+`Window-Columns-v0.1.0-beta.2-macos-arm64.zip` from the
+[v0.1.0-beta.2 prerelease](https://github.com/maskilx/window-columns/releases/tag/v0.1.0-beta.2),
 extract it, and move **Window Columns.app** to `/Applications`.
 
 The prebuilt beta is arm64-only. Intel Mac users should build from source.

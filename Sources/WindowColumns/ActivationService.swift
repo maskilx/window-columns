@@ -1,5 +1,5 @@
 import AppKit
-import ApplicationServices
+@preconcurrency import ApplicationServices
 import Foundation
 import SwiftUI
 
@@ -118,6 +118,8 @@ enum GroupHostChannel {
     static let companionQuitting = Notification.Name("com.adimaskil.WindowColumns.companionQuitting")
     /// Asked for from a companion's Dock menu.
     static let minimizeRequest = Notification.Name("com.adimaskil.WindowColumns.minimizeGroup")
+    /// Broadcast when a group is minimized so its companion can suppress cascade activation.
+    static let groupMinimized = Notification.Name("com.adimaskil.WindowColumns.groupMinimized")
 
     /// The helper encodes `<group uuid>|<helper pid>` so the controller can use
     /// the helper as the activation donor. Older helpers post the bare UUID.

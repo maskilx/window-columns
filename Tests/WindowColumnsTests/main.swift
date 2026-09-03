@@ -76,6 +76,7 @@ struct LayoutEngineChecks {
         precondition(ColumnLayoutEngine.nearestColumnIndex(to: 608, in: slots) == 1)
 
         checkWindowMatching()
+        checkFingerprintMatching()
         checkDisplacementClassification()
         checkFit()
         checkGroupMinimizationState()
@@ -245,5 +246,29 @@ struct LayoutEngineChecks {
         precondition(
             WindowMatcher.resolve(saved: saved, available: [identity("com.apple.dt.Xcode", "Project", 12)]) == [0]
         )
+    }
+
+    private static func checkFingerprintMatching() {
+        let original = WindowFingerprint(bundleIdentifier: "com.brave.Browser", title: "Original Title", windowNumber: 101)
+        let retitled = WindowFingerprint(bundleIdentifier: "com.brave.Browser", title: "New Tab — GitHub", windowNumber: 101)
+        let otherWindowSameApp = WindowFingerprint(bundleIdentifier: "com.brave.Browser", title: "Original Title", windowNumber: 102)
+        let differentApp = WindowFingerprint(bundleIdentifier: "com.apple.Safari", title: "Original Title", windowNumber: 101)
+
+        // Same bundle ID and window number matches even if title changes (e.g. web navigation)
+        precondition(original.matches(retitled))
+        precondition(retitled.matches(original))
+
+        // Different window numbers do not match
+        precondition(!original.matches(otherWindowSameApp))
+
+        // Different bundle IDs never match
+        precondition(!original.matches(differentApp))
+
+        // When numbers are missing (e.g. app restarted), title is required
+        let unnumbered1 = WindowFingerprint(bundleIdentifier: "com.brave.Browser", title: "Docs", windowNumber: nil)
+        let unnumbered2 = WindowFingerprint(bundleIdentifier: "com.brave.Browser", title: "Docs", windowNumber: nil)
+        let unnumbered3 = WindowFingerprint(bundleIdentifier: "com.brave.Browser", title: "Other", windowNumber: nil)
+        precondition(unnumbered1.matches(unnumbered2))
+        precondition(!unnumbered1.matches(unnumbered3))
     }
 }

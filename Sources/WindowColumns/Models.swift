@@ -1,19 +1,9 @@
 import AppKit
 import Foundation
+import WindowColumnsCore
 
-struct WindowFingerprint: Codable, Hashable {
-    let bundleIdentifier: String
-    let title: String
-    let windowNumber: UInt32?
+typealias WindowFingerprint = WindowColumnsCore.WindowFingerprint
 
-    func matches(_ other: WindowFingerprint) -> Bool {
-        guard bundleIdentifier == other.bundleIdentifier, title == other.title else { return false }
-        if let windowNumber, let otherNumber = other.windowNumber {
-            return windowNumber == otherNumber
-        }
-        return true
-    }
-}
 
 struct ManagedWindow: Identifiable {
     let id: UUID
@@ -26,6 +16,7 @@ struct ManagedWindow: Identifiable {
     var frame: CGRect
     var minimumSize: CGSize
     var isMinimized: Bool
+    var isFullScreen: Bool
     var isSelected: Bool
 
     var fingerprint: WindowFingerprint {
@@ -121,11 +112,27 @@ enum AppAppearance: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum SwitcherDesignStyle: String, Codable, CaseIterable, Identifiable {
+    case modern = "modern"
+    case classic = "classic"
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .modern: return "Modern (Concept A)"
+        case .classic: return "Classic"
+        }
+    }
+}
+
 struct LayoutPreferences: Codable, Equatable {
     var gap: Double
     var launchAtLogin: Bool
     var showWindowPreviews: Bool
+    var showDockIcon: Bool
     var appearance: AppAppearance
+    var switcherDesignStyle: SwitcherDesignStyle
+    var geminiAPIKey: String?
     /// Modifiers shared by the ⌃⌥⌘2 … ⌃⌥⌘9 column shortcuts.
     var columnModifierFlags: UInt
     var undoShortcut: ShortcutBinding?
@@ -141,7 +148,10 @@ struct LayoutPreferences: Codable, Equatable {
         gap: Double = 8,
         launchAtLogin: Bool = false,
         showWindowPreviews: Bool = true,
+        showDockIcon: Bool = false,
         appearance: AppAppearance = .system,
+        switcherDesignStyle: SwitcherDesignStyle = .modern,
+        geminiAPIKey: String? = nil,
         columnModifierFlags: UInt = LayoutPreferences.defaultColumnModifiers,
         undoShortcut: ShortcutBinding? = .undoDefault,
         openChooserShortcut: ShortcutBinding? = nil,
@@ -152,7 +162,10 @@ struct LayoutPreferences: Codable, Equatable {
         self.gap = gap
         self.launchAtLogin = launchAtLogin
         self.showWindowPreviews = showWindowPreviews
+        self.showDockIcon = showDockIcon
         self.appearance = appearance
+        self.switcherDesignStyle = switcherDesignStyle
+        self.geminiAPIKey = geminiAPIKey
         self.columnModifierFlags = columnModifierFlags
         self.undoShortcut = undoShortcut
         self.openChooserShortcut = openChooserShortcut
@@ -162,7 +175,7 @@ struct LayoutPreferences: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case gap, launchAtLogin, showWindowPreviews, appearance
+        case gap, launchAtLogin, showWindowPreviews, showDockIcon, appearance, switcherDesignStyle, geminiAPIKey
         case columnModifierFlags, undoShortcut, openChooserShortcut, createGroupShortcut
         case doubleTapModifier, minimizeGroupShortcut
     }
@@ -174,7 +187,10 @@ struct LayoutPreferences: Codable, Equatable {
         gap = try container.decodeIfPresent(Double.self, forKey: .gap) ?? 8
         launchAtLogin = try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
         showWindowPreviews = try container.decodeIfPresent(Bool.self, forKey: .showWindowPreviews) ?? true
+        showDockIcon = try container.decodeIfPresent(Bool.self, forKey: .showDockIcon) ?? false
         appearance = try container.decodeIfPresent(AppAppearance.self, forKey: .appearance) ?? .system
+        switcherDesignStyle = try container.decodeIfPresent(SwitcherDesignStyle.self, forKey: .switcherDesignStyle) ?? .modern
+        geminiAPIKey = try container.decodeIfPresent(String.self, forKey: .geminiAPIKey)
         columnModifierFlags = try container.decodeIfPresent(UInt.self, forKey: .columnModifierFlags)
             ?? LayoutPreferences.defaultColumnModifiers
         undoShortcut = try container.decodeIfPresent(ShortcutBinding.self, forKey: .undoShortcut)

@@ -3,11 +3,10 @@ import AppKit
 @MainActor
 final class DividerOverlayController {
     private let coordinator: WindowCoordinator
+    private let dropIndicator = DropIndicatorController()
     private var panels: [NSPanel] = []
     private var frames: [CGRect] = []
     private var workspaceObservers: [NSObjectProtocol] = []
-    private var pendingDragDeltas: [Int: CGFloat] = [:]
-    private var resizeWorkItem: DispatchWorkItem?
     private var draggingDivider: Int?
 
     init(coordinator: WindowCoordinator) {
@@ -17,6 +16,13 @@ final class DividerOverlayController {
         }
         coordinator.onFrontmostWindowChanged = { [weak self] in
             self?.render()
+        }
+        coordinator.onDropTargetChanged = { [weak self] targetFrame in
+            if let targetFrame {
+                self?.dropIndicator.show(in: targetFrame)
+            } else {
+                self?.dropIndicator.hide()
+            }
         }
         let workspaceCenter = NSWorkspace.shared.notificationCenter
         for name in [
@@ -37,11 +43,10 @@ final class DividerOverlayController {
     }
 
     func close() {
-        resizeWorkItem?.cancel()
-        resizeWorkItem = nil
-        pendingDragDeltas.removeAll()
         coordinator.onLayoutFramesChanged = nil
         coordinator.onFrontmostWindowChanged = nil
+        coordinator.onDropTargetChanged = nil
+        dropIndicator.close()
         for observer in workspaceObservers {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
@@ -56,36 +61,51 @@ final class DividerOverlayController {
     }
 
     private func render() {
-        guard frames.count >= 2, coordinator.selectedGroupHasFocusedVisibleWindow() else {
+        let selected = coordinator.selectedWindows
+        let activeFrames = selected.count >= 2 ? selected.map(\.frame) : self.frames
+        guard activeFrames.count >= 2, coordinator.selectedGroupHasFocusedVisibleWindow() else {
             hidePanels()
             return
         }
-        while panels.count < frames.count - 1 {
+        while panels.count < activeFrames.count - 1 {
             panels.append(makePanel(divider: panels.count))
         }
         for index in panels.indices {
-            guard index < frames.count - 1 else {
+            guard index < activeFrames.count - 1 else {
                 panels[index].orderOut(nil)
                 continue
             }
-            if index == draggingDivider {
-                panels[index].orderFrontRegardless()
+            if selected.indices.contains(index), selected.indices.contains(index + 1) {
+                if selected[index].isFullScreen || selected[index + 1].isFullScreen ||
+                   selected[index].isMinimized || selected[index + 1].isMinimized {
+                    panels[index].orderOut(nil)
+                    continue
+                }
+            }
+            let leftFrame = activeFrames[index]
+            let rightFrame = activeFrames[index + 1]
+
+            // Windows must be horizontally adjacent with a small gap, never overlapping.
+            let gap = rightFrame.minX - leftFrame.maxX
+            guard gap >= -2, gap <= 40 else {
+                panels[index].orderOut(nil)
                 continue
             }
-            // Span the whole shared edge. The grab target used to be a 92 pt
-            // pill at the vertical midpoint of a column that is typically ~868 pt
-            // tall, so resizing meant hunting for a narrow band in the middle.
-            let x = (frames[index].maxX + frames[index + 1].minX) / 2
-            let top = min(frames[index].maxY, frames[index + 1].maxY)
-            let bottom = max(frames[index].minY, frames[index + 1].minY)
-            let gap = frames[index + 1].minX - frames[index].maxX
-            // Stay inside the gap where there is one, so a zero-gap layout does
-            // not swallow clicks along the full height of both windows.
+
+            // Windows must vertically overlap to share an edge.
+            let top = min(leftFrame.maxY, rightFrame.maxY)
+            let bottom = max(leftFrame.minY, rightFrame.minY)
+            let verticalOverlap = top - bottom
+            guard verticalOverlap >= 40 else {
+                panels[index].orderOut(nil)
+                continue
+            }
+
+            // Span the shared edge strictly inside the gap.
+            let x = (leftFrame.maxX + rightFrame.minX) / 2
             let width = max(6, min(14, gap + 4))
-            panels[index].setFrame(
-                CGRect(x: x - width / 2, y: bottom, width: width, height: max(24, top - bottom)),
-                display: true
-            )
+            let panelFrame = CGRect(x: x - width / 2, y: bottom, width: width, height: verticalOverlap)
+            panels[index].setFrame(panelFrame, display: true)
             panels[index].orderFrontRegardless()
         }
     }
@@ -135,28 +155,10 @@ final class DividerOverlayController {
 
     private func queueDrag(after divider: Int, by delta: CGFloat) {
         draggingDivider = divider
-        pendingDragDeltas[divider, default: 0] += delta
-        guard resizeWorkItem == nil else { return }
-        let item = DispatchWorkItem { [weak self] in
-            self?.flushPendingDrag()
-        }
-        resizeWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0, execute: item)
-    }
-
-    private func flushPendingDrag() {
-        resizeWorkItem = nil
-        let deltas = pendingDragDeltas
-        pendingDragDeltas.removeAll(keepingCapacity: true)
-        for (divider, delta) in deltas where abs(delta) > 0.01 {
-            coordinator.dragDivider(after: divider, by: delta)
-        }
+        coordinator.dragDivider(after: divider, by: delta)
     }
 
     private func finishDrag() {
-        resizeWorkItem?.cancel()
-        resizeWorkItem = nil
-        flushPendingDrag()
         coordinator.finishDividerDrag { [weak self] in
             self?.draggingDivider = nil
             self?.render()
@@ -219,6 +221,7 @@ private final class DividerHandleView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         lastScreenX = NSEvent.mouseLocation.x
+        needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -229,14 +232,12 @@ private final class DividerHandleView: NSView {
         }
         lastScreenX = current
         let delta = current - previous
-        if let panel = window as? NSPanel {
-            panel.setFrameOrigin(CGPoint(x: panel.frame.minX + delta, y: panel.frame.minY))
-        }
         onDrag(delta)
     }
 
     override func mouseUp(with event: NSEvent) {
         lastScreenX = nil
+        needsDisplay = true
         onEnd()
     }
 
@@ -250,8 +251,20 @@ private final class DividerHandleView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let width: CGFloat = hovered ? 5 : 3
-        let height: CGFloat = 56
+        let isDragging = lastScreenX != nil
+
+        if isDragging {
+            let guidePath = NSBezierPath()
+            let guideX = bounds.midX
+            guidePath.move(to: CGPoint(x: guideX, y: bounds.minY))
+            guidePath.line(to: CGPoint(x: guideX, y: bounds.maxY))
+            NSColor.controlAccentColor.withAlphaComponent(0.45).setStroke()
+            guidePath.lineWidth = 1.5
+            guidePath.stroke()
+        }
+
+        let width: CGFloat = isDragging ? 6 : (hovered ? 5 : 3.5)
+        let height: CGFloat = isDragging ? 68 : 58
         let centre = (pointerY ?? bounds.midY)
             .clamped(to: (bounds.minY + height / 2)...(bounds.maxY - height / 2))
         let rect = CGRect(
@@ -260,9 +273,32 @@ private final class DividerHandleView: NSView {
             width: width,
             height: height
         )
-        let color = NSColor.white.withAlphaComponent(hovered ? 1.0 : 0.78)
-        color.setFill()
-        NSBezierPath(roundedRect: rect, xRadius: width / 2, yRadius: width / 2).fill()
+
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(isDragging ? 0.35 : 0.22)
+        shadow.shadowBlurRadius = isDragging ? 4 : 2.5
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        shadow.set()
+
+        let pillPath = NSBezierPath(roundedRect: rect, xRadius: width / 2, yRadius: width / 2)
+        let fillColor: NSColor
+        if isDragging {
+            fillColor = .controlAccentColor
+        } else if hovered {
+            fillColor = .white
+        } else {
+            fillColor = NSColor.white.withAlphaComponent(0.82)
+        }
+        fillColor.setFill()
+        pillPath.fill()
+
+        let strokeColor = isDragging ? NSColor.white.withAlphaComponent(0.4) : NSColor.black.withAlphaComponent(0.18)
+        strokeColor.setStroke()
+        pillPath.lineWidth = 0.5
+        pillPath.stroke()
+
+        NSGraphicsContext.restoreGraphicsState()
     }
 }
 

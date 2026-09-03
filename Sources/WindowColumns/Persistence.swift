@@ -11,8 +11,10 @@ final class LayoutStore: ObservableObject {
     }
 
     private let key = "WindowColumns.savedState.v1"
+    private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         if let data = defaults.data(forKey: key), let payload = try? JSONDecoder().decode(Payload.self, from: data) {
             layouts = payload.layouts
             preferences = payload.preferences
@@ -41,7 +43,7 @@ final class LayoutStore: ObservableObject {
     private func save() {
         let payload = Payload(layouts: layouts, preferences: preferences)
         if let data = try? JSONEncoder().encode(payload) {
-            UserDefaults.standard.set(data, forKey: key)
+            defaults.set(data, forKey: key)
         }
     }
 }

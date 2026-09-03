@@ -1,178 +1,7 @@
 import AppKit
 import SwiftUI
 
-struct MenuContentView: View {
-    @ObservedObject var model: AppModel
-    @ObservedObject private var coordinator: WindowCoordinator
-    @ObservedObject private var store: LayoutStore
-    @State private var saveName = ""
-    @State private var showWindowList = false
-    @State private var pickCount = 3
 
-    init(model: AppModel) {
-        self.model = model
-        coordinator = model.coordinator
-        store = model.store
-    }
-
-    var body: some View {
-        Group {
-            if coordinator.isTrusted { mainContent } else { OnboardingView(coordinator: coordinator) }
-        }
-        .frame(width: 370)
-        .onAppear { coordinator.refresh() }
-        .alert(item: $coordinator.lastError) { error in
-            Alert(title: Text("Window Columns"), message: Text(error.localizedDescription))
-        }
-    }
-
-    private var mainContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Window Columns", systemImage: "rectangle.split.3x1")
-                    .font(.headline)
-                Spacer()
-                if coordinator.isApplyingLayout { ProgressView().controlSize(.small) }
-                Button { coordinator.refresh() } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(ElegantIconButtonStyle())
-                    .help("Refresh windows")
-            }
-
-            Picker("Display", selection: $coordinator.selectedDisplayID) {
-                ForEach(coordinator.displays) { display in Text(display.name).tag(display.id) }
-            }
-
-            if let target = model.pickingTarget {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Click \(target - model.pickedCount) more window\(target - model.pickedCount == 1 ? "" : "s")", systemImage: "cursorarrow.click.2")
-                        .font(.headline)
-                    Text("Click windows directly on screen. The layout starts automatically after window \(target).")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Button("Cancel picking") { model.cancelPicking() }
-                        .buttonStyle(ElegantButtonStyle(kind: .secondary))
-                }
-                .padding(10)
-                .background(.tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-            } else {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("Pick windows on screen").font(.subheadline.weight(.semibold))
-                    HStack {
-                        Stepper("\(pickCount) windows", value: $pickCount, in: 2...9)
-                        Spacer()
-                        Button { model.startPicking(count: pickCount) } label: {
-                            Label("Start Picking", systemImage: "cursorarrow.click.2")
-                        }
-                            .buttonStyle(ElegantButtonStyle(kind: .primary))
-                            .help("Click \(pickCount) windows, then arrange them")
-                    }
-                    Text("Choose an amount, then click those windows anywhere on your desktop.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-
-            HStack {
-                Text("Gap")
-                Slider(value: Binding(
-                    get: { coordinator.gap },
-                    set: { model.updateGap($0) }
-                ), in: 0...32, step: 1)
-                Text("\(Int(coordinator.gap)) px").monospacedDigit().frame(width: 42, alignment: .trailing)
-            }
-
-            if !coordinator.groups.isEmpty {
-                Divider()
-                Text("Window groups").font(.subheadline.weight(.semibold))
-                ForEach(coordinator.groups) { group in
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(GroupPalette.color(at: group.colorIndex))
-                            .frame(width: 10, height: 10)
-                        Button {
-                            _ = coordinator.activateGroup(group.id)
-                        } label: {
-                            HStack {
-                                Text(group.name)
-                                Spacer()
-                                Text("\(group.windows.count)")
-                                    .monospacedDigit().foregroundStyle(.secondary)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        Button {
-                            coordinator.deleteGroup(group.id)
-                        } label: {
-                            Image(systemName: "xmark")
-                        }
-                        .buttonStyle(ElegantIconButtonStyle(destructive: true, size: 26))
-                    }
-                }
-            }
-
-            DisclosureGroup("Choose from a list instead", isExpanded: $showWindowList) {
-                VStack(alignment: .leading, spacing: 6) {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 4) {
-                            ForEach(coordinator.windows) { window in
-                                Toggle(isOn: Binding(
-                                    get: { coordinator.windows.first(where: { $0.id == window.id })?.isSelected ?? false },
-                                    set: { _ in coordinator.toggleSelection(window.id) }
-                                )) {
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(window.title).lineLimit(1)
-                                        Text(window.appName).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                }
-                                .toggleStyle(.checkbox)
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 170)
-                    Button { coordinator.arrangeEqualColumns() } label: {
-                        Label("Arrange selected equally", systemImage: "rectangle.split.3x1")
-                    }
-                        .buttonStyle(ElegantButtonStyle(kind: .primary))
-                        .disabled(coordinator.selectedWindows.count < 2)
-                }
-            }
-
-            if !store.layouts(for: coordinator.selectedDisplayID).isEmpty {
-                Divider()
-                Text("Saved for this display").font(.subheadline.weight(.semibold))
-                ForEach(store.layouts(for: coordinator.selectedDisplayID)) { layout in
-                    Button(layout.name) { coordinator.applySavedLayout(layout) }
-                        .buttonStyle(ElegantButtonStyle(kind: .secondary))
-                }
-            }
-
-            HStack {
-                TextField("Layout name", text: $saveName)
-                Button("Save") { saveLayout() }
-                    .buttonStyle(ElegantButtonStyle(kind: .primary, minWidth: 72))
-                    .disabled(coordinator.selectedWindows.count < 2)
-            }
-
-            Divider()
-            HStack {
-                Button("Settings…") {
-                    SettingsWindow.open(model: model)
-                    NSApp.activate(ignoringOtherApps: true)
-                }
-                .buttonStyle(ElegantButtonStyle(kind: .secondary))
-                Spacer()
-                Button("Quit") { NSApplication.shared.terminate(nil) }
-                    .buttonStyle(ElegantButtonStyle(kind: .destructive))
-            }
-        }
-        .padding(14)
-    }
-
-    private func saveLayout() {
-        let name = saveName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let layout = coordinator.makeSavedLayout(name: name.isEmpty ? "Layout \(store.layouts.count + 1)" : name) else { return }
-        store.upsert(layout)
-        saveName = ""
-    }
-}
 
 struct OnboardingView: View {
     @ObservedObject var coordinator: WindowCoordinator
@@ -343,6 +172,12 @@ struct SettingsView: View {
                         catch { loginError = error.localizedDescription }
                     }
                 ))
+                Toggle("Show icon in Dock", isOn: Binding(
+                    get: { store.preferences.showDockIcon },
+                    set: { model.setShowDockIcon($0) }
+                ))
+                Text("Displays the app icon and running indicator dot in the macOS Dock.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Picker("Appearance", selection: Binding(
                     get: { store.preferences.appearance },
                     set: { model.setAppearance($0) }
@@ -353,12 +188,41 @@ struct SettingsView: View {
             }
 
             Section("Chooser") {
+                Picker("Design style", selection: Binding(
+                    get: { store.preferences.switcherDesignStyle },
+                    set: { model.setSwitcherDesignStyle($0) }
+                )) {
+                    ForEach(SwitcherDesignStyle.allCases) { style in
+                        Text(style.label).tag(style)
+                    }
+                }
+                .pickerStyle(.segmented)
+
                 Toggle("Show window previews", isOn: Binding(
                     get: { store.preferences.showWindowPreviews },
                     set: { store.preferences.showWindowPreviews = $0 }
                 ))
                 Text("Thumbnails need Screen Recording permission. With previews off the chooser shows application icons and is considerably denser.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("AI Group Naming (Free)") {
+                SecureField("Gemini API Key", text: Binding(
+                    get: { model.geminiAPIKey },
+                    set: { model.geminiAPIKey = $0 }
+                ))
+                HStack {
+                    Text("Uses Google Gemini 2.0 Flash to suggest concise group names. Free tier available with no credit card.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Get Free Key") {
+                        if let url = URL(string: "https://aistudio.google.com/app/apikey") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                }
             }
 
             Section("Layout") {

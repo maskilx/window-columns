@@ -19,15 +19,23 @@ final class KeyablePanel: NSPanel {
 @MainActor
 final class WindowSwitcherModel: ObservableObject {
     struct Option: Identifiable {
+        struct GroupTag: Identifiable, Equatable {
+            let id: UUID
+            let name: String
+            let colorIndex: Int
+        }
+
         let id: UUID
         let title: String
         let appName: String
         let icon: NSImage
         let fingerprint: WindowFingerprint
-        let groupID: UUID?
-        let groupName: String?
-        let groupColorIndex: Int?
+        let groups: [GroupTag]
+        var groupID: UUID? { groups.first?.id }
+        var groupName: String? { groups.first?.name }
+        var groupColorIndex: Int? { groups.first?.colorIndex }
         let isMinimized: Bool
+        let isFullScreen: Bool
         /// Narrowest this window will go. Some refuse to share the display.
         let minimumWidth: CGFloat
     }
@@ -59,7 +67,9 @@ final class WindowSwitcherModel: ObservableObject {
     /// Thumbnails arrive after the chooser is already on screen.
     @Published private(set) var previews: [UUID: NSImage] = [:]
     private var previewTask: Task<Void, Never>?
+    private var namingTask: Task<Void, Never>?
     @Published private(set) var selectedIDs: [UUID] = [] { didSet { rebuildLayoutPlan() } }
+    @Published var customRatios: [CGFloat]?
     @Published var focusedIndex = 0
     @Published private(set) var hasExistingGroup = false
     @Published private(set) var groups: [WindowGroupSnapshot] = []
@@ -67,6 +77,9 @@ final class WindowSwitcherModel: ObservableObject {
     @Published private(set) var editingGroupID: UUID?
     @Published var showWindowPreviews: Bool
     @Published private(set) var canShowWindowPreviews = false
+    @Published var pendingNameSuggestions: [UUID: String] = [:]
+    @Published var isGeneratingNames: Bool = false
+    @Published var namingNotice: String? = nil
 
     private let coordinator: WindowCoordinator
     private let store: LayoutStore
@@ -77,6 +90,14 @@ final class WindowSwitcherModel: ObservableObject {
     var appearance: AppAppearance { store.preferences.appearance }
     func setAppearance(_ value: AppAppearance) {
         appModel.setAppearance(value)
+        objectWillChange.send()
+    }
+
+    var switcherDesignStyle: SwitcherDesignStyle {
+        appModel.switcherDesignStyle
+    }
+    func setSwitcherDesignStyle(_ value: SwitcherDesignStyle) {
+        appModel.setSwitcherDesignStyle(value)
         objectWillChange.send()
     }
 
@@ -99,6 +120,7 @@ final class WindowSwitcherModel: ObservableObject {
     ///   window on the system and is the slowest thing the chooser does.
     func reload(createNewGroup: Bool = false, rescanWindows: Bool = true) {
         if rescanWindows { coordinator.refresh() }
+        showWindowPreviews = store.preferences.showWindowPreviews
         groups = coordinator.groups
         canShowWindowPreviews = coordinator.canShowWindowPreviews
         isCreatingNewGroup = createNewGroup
@@ -109,17 +131,18 @@ final class WindowSwitcherModel: ObservableObject {
             let icon = NSRunningApplication(processIdentifier: window.pid)?.icon
                 ?? NSImage(systemSymbolName: "macwindow", accessibilityDescription: nil)
                 ?? NSImage()
-            let group = coordinator.group(containing: window)
+            let containingGroups = coordinator.groups(containing: window).map {
+                Option.GroupTag(id: $0.id, name: $0.name, colorIndex: $0.colorIndex)
+            }
             return Option(
                 id: window.id,
                 title: window.title,
                 appName: window.appName,
                 icon: icon,
                 fingerprint: window.fingerprint,
-                groupID: group?.id,
-                groupName: group?.name,
-                groupColorIndex: group?.colorIndex,
+                groups: containingGroups,
                 isMinimized: window.isMinimized,
+                isFullScreen: window.isFullScreen,
                 minimumWidth: window.minimumSize.width
             )
         }
@@ -185,8 +208,11 @@ final class WindowSwitcherModel: ObservableObject {
     private func rebuildLayoutPlan() {
         errorMessage = nil
         let physical = Array(selectedIDs.reversed())
+        if let ratios = customRatios, ratios.count != physical.count {
+            customRatios = nil
+        }
         guard physical.count >= 2,
-              let result = coordinator.previewLayout(forOrder: physical),
+              let result = coordinator.previewLayout(forOrder: physical, customRatios: customRatios),
               result.display.width > 0 else {
             layoutPlan = nil
             return
@@ -240,6 +266,67 @@ final class WindowSwitcherModel: ObservableObject {
         guard newIndex != oldIndex else { return }
         selectedIDs.remove(at: oldIndex)
         selectedIDs.insert(id, at: newIndex)
+    }
+
+    func reorderPhysicalColumns(from sourceIndex: Int, to destinationIndex: Int) {
+        var physical = Array(selectedIDs.reversed())
+        guard physical.indices.contains(sourceIndex),
+              physical.indices.contains(destinationIndex),
+              sourceIndex != destinationIndex else { return }
+        let item = physical.remove(at: sourceIndex)
+        physical.insert(item, at: destinationIndex)
+
+        if var ratios = customRatios, ratios.indices.contains(sourceIndex), ratios.indices.contains(destinationIndex) {
+            let ratio = ratios.remove(at: sourceIndex)
+            ratios.insert(ratio, at: destinationIndex)
+            customRatios = ratios
+        }
+
+        selectedIDs = Array(physical.reversed())
+    }
+
+    func movePhysicalColumn(at index: Int, offset: Int) {
+        reorderPhysicalColumns(from: index, to: index + offset)
+    }
+
+    func adjustSplitRatio(at index: Int, delta: CGFloat) {
+        let physical = Array(selectedIDs.reversed())
+        let count = physical.count
+        guard count >= 2, index >= 0, index < count - 1 else { return }
+
+        var current = customRatios ?? Array(repeating: 1.0 / CGFloat(count), count: count)
+        guard current.count == count else { return }
+
+        let minRatio: CGFloat = 0.12
+        let oldA = current[index]
+        let oldB = current[index + 1]
+
+        var newA = oldA + delta
+        var newB = oldB - delta
+
+        if newA < minRatio {
+            let overflow = minRatio - newA
+            newA = minRatio
+            newB -= overflow
+        }
+        if newB < minRatio {
+            let overflow = minRatio - newB
+            newB = minRatio
+            newA -= overflow
+        }
+
+        guard newA >= minRatio && newB >= minRatio else { return }
+        current[index] = newA
+        current[index + 1] = newB
+
+        let sum = current.reduce(0, +)
+        customRatios = sum > 0 ? current.map { $0 / sum } : current
+        rebuildLayoutPlan()
+    }
+
+    func resetCustomRatios() {
+        customRatios = nil
+        rebuildLayoutPlan()
     }
 
     func detach(_ id: UUID) {
@@ -311,6 +398,11 @@ final class WindowSwitcherModel: ObservableObject {
         // Release them as soon as the chooser closes.
         previewTask?.cancel()
         previewTask = nil
+        namingTask?.cancel()
+        namingTask = nil
+        pendingNameSuggestions = [:]
+        isGeneratingNames = false
+        namingNotice = nil
         previews = [:]
         options = []
         selectedIDs = []
@@ -326,16 +418,92 @@ final class WindowSwitcherModel: ObservableObject {
     func rename(_ id: UUID, to name: String) {
         coordinator.renameGroup(id, to: name)
         groups = coordinator.groups
+        options = options.map { opt in
+            let updatedGroups = opt.groups.map { grp in
+                grp.id == id ? Option.GroupTag(id: grp.id, name: name, colorIndex: grp.colorIndex) : grp
+            }
+            return Option(
+                id: opt.id,
+                title: opt.title,
+                appName: opt.appName,
+                icon: opt.icon,
+                fingerprint: opt.fingerprint,
+                groups: updatedGroups,
+                isMinimized: opt.isMinimized,
+                isFullScreen: opt.isFullScreen,
+                minimumWidth: opt.minimumWidth
+            )
+        }
     }
 
     func deleteGroup(_ id: UUID) {
         coordinator.deleteGroup(id)
         groups = coordinator.groups
+        pendingNameSuggestions.removeValue(forKey: id)
         if editingGroupID == id {
             editingGroupID = nil
             selectedIDs = []
             hasExistingGroup = false
         }
+        options = options.map { opt in
+            let updatedGroups = opt.groups.filter { $0.id != id }
+            return Option(
+                id: opt.id,
+                title: opt.title,
+                appName: opt.appName,
+                icon: opt.icon,
+                fingerprint: opt.fingerprint,
+                groups: updatedGroups,
+                isMinimized: opt.isMinimized,
+                isFullScreen: opt.isFullScreen,
+                minimumWidth: opt.minimumWidth
+            )
+        }
+    }
+
+    func requestNameSuggestions() {
+        guard !groups.isEmpty else { return }
+        namingTask?.cancel()
+        isGeneratingNames = true
+        namingNotice = nil
+
+        let requests = groups.map { group -> GroupNamingRequest in
+            let memberOpts = options.filter { $0.groupID == group.id }
+            let windows = memberOpts.map { (appName: $0.appName, title: $0.title) }
+            return GroupNamingRequest(id: group.id, currentName: group.name, windows: windows)
+        }
+
+        let apiKey = appModel.geminiAPIKey.isEmpty ? nil : appModel.geminiAPIKey
+
+        namingTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await AIGroupNamingService.shared.suggestNames(for: requests, apiKey: apiKey)
+            guard !Task.isCancelled else { return }
+            self.isGeneratingNames = false
+            self.pendingNameSuggestions = result.suggestions
+            self.namingNotice = result.notice
+        }
+    }
+
+    func acceptSuggestion(for groupID: UUID) {
+        if let suggestedName = pendingNameSuggestions.removeValue(forKey: groupID) {
+            rename(groupID, to: suggestedName)
+        }
+    }
+
+    func acceptAllSuggestions() {
+        for (id, name) in pendingNameSuggestions {
+            rename(id, to: name)
+        }
+        pendingNameSuggestions.removeAll()
+    }
+
+    func rejectSuggestion(for groupID: UUID) {
+        pendingNameSuggestions.removeValue(forKey: groupID)
+    }
+
+    func discardAllSuggestions() {
+        pendingNameSuggestions.removeAll()
     }
 
     var selectedOptions: [Option] {
@@ -353,9 +521,9 @@ final class WindowSwitcherModel: ObservableObject {
         guard selectedIDs.count >= 2 else { return }
         let succeeded: Bool
         if let editingGroupID {
-            succeeded = coordinator.updateGroup(editingGroupID, inOrder: Array(selectedIDs.reversed()))
+            succeeded = coordinator.updateGroup(editingGroupID, inOrder: Array(selectedIDs.reversed()), preferredRatios: customRatios)
         } else {
-            succeeded = coordinator.createGroup(inOrder: Array(selectedIDs.reversed())) != nil
+            succeeded = coordinator.createGroup(inOrder: Array(selectedIDs.reversed()), preferredRatios: customRatios) != nil
         }
         if succeeded {
             dismiss?()
@@ -397,31 +565,20 @@ struct ChooserMetrics {
         on screen: NSScreen?
     ) -> ChooserMetrics {
         let available = screen?.visibleFrame.size ?? CGSize(width: 1280, height: 800)
-        let maxWidth = min(available.width - 80, 1240)
-        let maxHeight = min(available.height - 80, 860)
-        let card = cardSize(previews: previews)
-        let count = max(optionCount, 1)
+        let screenWidth = max(available.width, screen?.frame.width ?? 0)
+        let isLargeDisplay = screenWidth >= 1800
 
-        let chrome = padding * 2
-        let widest = max(1, Int((maxWidth - chrome + cardSpacing) / (card.width + cardSpacing)))
-        // Aim for a roughly landscape block rather than one long row: eight
-        // windows in a single row of eight is as awkward as eight in a column.
-        let balanced = max(1, Int(ceil((Double(count) * 1.7).squareRoot())))
-        let columnCount = max(1, min(widest, count, balanced))
-        let width = min(maxWidth, chrome + CGFloat(columnCount) * card.width
-            + CGFloat(columnCount - 1) * cardSpacing)
+        let targetWidth: CGFloat = isLargeDisplay ? 920 : 720
+        let targetHeight: CGFloat = isLargeDisplay ? 680 : 560
+        let targetColumns: Int = isLargeDisplay ? 4 : 3
 
-        let rows = max(1, Int(ceil(Double(count) / Double(columnCount))))
-        let gridHeight = CGFloat(rows) * card.height + CGFloat(rows - 1) * cardSpacing
-        // shelf + header + optional layout preview + footer + the stack's spacing
-        let fixed: CGFloat = (hasGroups ? 74 : 0) + 62 + (reservesPreview ? 84 : 0)
-            + 46 + chrome + (hasGroups ? 48 : 32)
-        let height = min(maxHeight, max(300, fixed + gridHeight))
-        return ChooserMetrics(columnCount: columnCount, width: width, height: height)
+        let width = min(targetWidth, max(500, available.width - 60))
+        let height = min(targetHeight, max(400, available.height - 60))
+        return ChooserMetrics(columnCount: targetColumns, width: width, height: height)
     }
 }
 
-struct WindowSwitcherView: View {
+struct ClassicWindowSwitcherView: View {
     @ObservedObject var model: WindowSwitcherModel
     let metrics: ChooserMetrics
     let onCancel: () -> Void
@@ -575,6 +732,813 @@ struct WindowSwitcherView: View {
     }
 }
 
+struct WindowSwitcherView: View {
+    @ObservedObject var model: WindowSwitcherModel
+    let metrics: ChooserMetrics
+    let onCancel: () -> Void
+    let onFocusFilter: () -> Void
+
+    var body: some View {
+        if model.switcherDesignStyle == .classic {
+            ClassicWindowSwitcherView(
+                model: model,
+                metrics: metrics,
+                onCancel: onCancel,
+                onFocusFilter: onFocusFilter
+            )
+        } else {
+            ModernWindowSwitcherView(
+                model: model,
+                metrics: metrics,
+                onCancel: onCancel,
+                onFocusFilter: onFocusFilter
+            )
+        }
+    }
+}
+
+struct ModernWindowSwitcherView: View {
+    @ObservedObject var model: WindowSwitcherModel
+    let metrics: ChooserMetrics
+    let onCancel: () -> Void
+    let onFocusFilter: () -> Void
+
+    private var headline: String {
+        if let editing = model.editingGroup { return "Editing \(editing.name)" }
+        return model.isCreatingNewGroup ? "Create a window group" : "Choose windows"
+    }
+
+    private var guidance: String {
+        if model.editingGroup != nil {
+            return "Click a window to add or remove it, then press Return to apply"
+        }
+        return model.isCreatingNewGroup
+            ? "Choose two or more windows. This group gets its own Command-Tab icon."
+            : "Click windows in order — the dock below shows the resulting columns"
+    }
+
+    private var columns: [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(), spacing: ChooserMetrics.cardSpacing),
+            count: metrics.columnCount
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if !model.groups.isEmpty {
+                ModernGroupShelf(model: model)
+            }
+
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(headline)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.primary)
+                    Text(guidance)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if model.showWindowPreviews && !model.canShowWindowPreviews {
+                    Button("Allow Previews") {
+                        model.requestPreviewPermission()
+                    }
+                    .buttonStyle(ElegantButtonStyle(kind: .secondary, minWidth: 100))
+                    .help("Window thumbnails need optional Screen Recording access")
+                }
+                ChooserSearchField(text: Binding(
+                    get: { model.filterText },
+                    set: { model.filterText = $0 }
+                ))
+                .frame(width: 190)
+                ChooserSettingsMenu(model: model)
+            }
+
+            if model.visibleOptions.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: model.filterText.isEmpty ? "macwindow.badge.xmark" : "magnifyingglass")
+                        .font(.system(size: 38))
+                        .foregroundStyle(.secondary)
+                    Text(model.filterText.isEmpty ? "No supported windows" : "No windows match “\(model.filterText)”")
+                        .font(.headline)
+                    Text(model.filterText.isEmpty
+                         ? "Open some resizable windows and try again."
+                         : "Press Escape to clear the filter.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ForEach(Array(model.visibleOptions.enumerated()), id: \.element.id) { index, option in
+                            ModernWindowOptionCard(
+                                option: option,
+                                preview: model.previews[option.id],
+                                canCapture: model.canShowWindowPreviews,
+                                selectionNumber: model.selectedIDs.firstIndex(of: option.id).map { $0 + 1 },
+                                isFocused: model.focusedIndex == index,
+                                previewsEnabled: model.showWindowPreviews,
+                                tooWideToShare: model.isTooWideToShare(option)
+                            )
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                model.focusedIndex = index
+                                model.toggle(option.id)
+                            }
+                            .draggable(option.id.uuidString)
+                        }
+                    }
+                    .padding(2)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            ModernColumnDock(model: model)
+
+            HStack {
+                if let errorMessage = model.errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                } else {
+                    HStack(spacing: 6) {
+                        shortcutPill("Return", label: "Select")
+                        Text("·").foregroundStyle(.white.opacity(0.3))
+                        shortcutPill("⌘Return", label: "Group")
+                        Text("·").foregroundStyle(.white.opacity(0.3))
+                        shortcutPill("Esc", label: "Close")
+                    }
+                }
+                Spacer()
+                if model.hasExistingGroup && !model.isCreatingNewGroup {
+                    Button(role: .destructive) { model.detachAll() } label: {
+                        Label("Detach All", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                    .buttonStyle(ElegantButtonStyle(kind: .destructive))
+                }
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(ElegantButtonStyle(kind: .secondary, minWidth: 76))
+                    .keyboardShortcut(.cancelAction)
+
+                Button { model.submit() } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: model.hasExistingGroup ? "checkmark.rectangle.stack" : "plus.rectangle.on.rectangle")
+                        Text(
+                            model.selectedIDs.count >= 2
+                                ? "\(model.hasExistingGroup ? "Update" : "Create") Group · \(model.selectedIDs.count)"
+                                : (model.hasExistingGroup ? "Update Group" : "Create Group")
+                        )
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .fill(
+                                model.selectedIDs.count >= 2
+                                    ? LinearGradient(colors: [Color.blue, Color.accentColor], startPoint: .topLeading, endPoint: .bottomTrailing)
+                                    : LinearGradient(colors: [Color.gray.opacity(0.4), Color.gray.opacity(0.3)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                            )
+                    )
+                    .shadow(color: model.selectedIDs.count >= 2 ? Color.accentColor.opacity(0.4) : .clear, radius: 6, y: 2)
+                }
+                .buttonStyle(.plain)
+                .disabled(model.selectedIDs.count < 2)
+            }
+        }
+        .padding(ChooserMetrics.padding)
+        .frame(width: metrics.width, height: metrics.height)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+        }
+    }
+
+    @ViewBuilder
+    private func shortcutPill(_ key: String, label: String) -> some View {
+        HStack(spacing: 4) {
+            Text(key)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                .foregroundStyle(.primary)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct ModernGroupShelf: View {
+    @ObservedObject var model: WindowSwitcherModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "rectangle.3.group")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text("Active Window Groups")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+
+                Spacer()
+
+                Button {
+                    model.requestNameSuggestions()
+                } label: {
+                    HStack(spacing: 4) {
+                        if model.isGeneratingNames {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Color.cyan)
+                        }
+                        Text(model.isGeneratingNames ? "Thinking…" : "Suggest Names")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color.white.opacity(0.08), in: Capsule())
+                    .overlay(
+                        Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(model.isGeneratingNames || model.groups.isEmpty)
+                .help("Ask AI to suggest names for all window groups")
+            }
+
+            if let notice = model.namingNotice {
+                Text(notice)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+
+            if !model.pendingNameSuggestions.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Image(systemName: "sparkles")
+                            .foregroundStyle(Color.cyan)
+                            .font(.system(size: 11))
+                        Text("Suggested Group Names")
+                            .font(.system(size: 11, weight: .semibold))
+                        Spacer()
+                        Button("Apply All") {
+                            model.acceptAllSuggestions()
+                        }
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.cyan)
+                        .buttonStyle(.plain)
+
+                        Text("·").foregroundStyle(.secondary)
+
+                        Button("Discard") {
+                            model.discardAllSuggestions()
+                        }
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .buttonStyle(.plain)
+                    }
+
+                    ForEach(model.groups.filter { model.pendingNameSuggestions[$0.id] != nil }) { group in
+                        if let suggestion = model.pendingNameSuggestions[group.id] {
+                            HStack(spacing: 8) {
+                                Text(group.name)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                    .strikethrough(group.name != suggestion)
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.secondary)
+                                Text(suggestion)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.primary)
+
+                                Spacer()
+
+                                Button {
+                                    model.acceptSuggestion(for: group.id)
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 8, weight: .bold))
+                                        Text("Accept")
+                                            .font(.system(size: 10, weight: .medium))
+                                    }
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.green.opacity(0.2), in: Capsule())
+                                    .foregroundStyle(Color.green)
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    model.rejectSuggestion(for: group.id)
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .padding(4)
+                                        .background(Color.white.opacity(0.1), in: Circle())
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                }
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.black.opacity(0.35))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.cyan.opacity(0.35), lineWidth: 1)
+                )
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(model.groups) { group in
+                        let isActive = model.activeGroupID == group.id
+                        let options = memberOptions(for: group)
+                        HStack(spacing: 10) {
+                            Button {
+                                model.editGroup(group.id)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    HStack(spacing: -7) {
+                                        ForEach(Array(options.prefix(4).enumerated()), id: \.element.id) { idx, option in
+                                            Image(nsImage: option.icon)
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(width: 24, height: 24)
+                                                .padding(2)
+                                                .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 6)
+                                                        .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                                                )
+                                                .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+                                                .zIndex(Double(4 - idx))
+                                        }
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 5) {
+                                            Text(group.name)
+                                                .font(.system(size: 12, weight: .semibold))
+                                                .foregroundStyle(.primary)
+                                            if isActive {
+                                                Circle()
+                                                    .fill(Color.green)
+                                                    .frame(width: 6, height: 6)
+                                                    .shadow(color: .green.opacity(0.6), radius: 3)
+                                            }
+                                        }
+                                        Text(isActive ? "Active · \(group.windows.count) windows" : "\(group.windows.count) windows")
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .help("Edit \(group.name)")
+
+                            HStack(spacing: 4) {
+                                Button {
+                                    model.activateGroup(group.id)
+                                } label: {
+                                    Image(systemName: "arrow.up.forward.app")
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+                                .buttonStyle(ElegantIconButtonStyle(size: 24))
+                                .help("Show \(group.name)")
+
+                                Button {
+                                    model.deleteGroup(group.id)
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 10, weight: .medium))
+                                }
+                                .buttonStyle(ElegantIconButtonStyle(destructive: true, size: 24))
+                                .help("Dismantle \(group.name)")
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(isActive ? Color.accentColor.opacity(0.12) : Color.white.opacity(0.06))
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(
+                                    isActive ? Color.accentColor.opacity(0.6) : Color.white.opacity(0.12),
+                                    lineWidth: 1
+                                )
+                        }
+                        .dropDestination(for: String.self) { values, _ in
+                            guard let value = values.first, let id = UUID(uuidString: value) else { return false }
+                            model.moveWindow(id, to: group.id)
+                            return true
+                        }
+                    }
+                }
+            }
+            .frame(height: 52)
+        }
+    }
+
+    private func memberOptions(for group: WindowGroupSnapshot) -> [WindowSwitcherModel.Option] {
+        model.options.filter { $0.groupID == group.id }
+    }
+}
+
+private struct ModernWindowOptionCard: View {
+    let option: WindowSwitcherModel.Option
+    let preview: NSImage?
+    let canCapture: Bool
+    let selectionNumber: Int?
+    let isFocused: Bool
+    let previewsEnabled: Bool
+    let tooWideToShare: Bool
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack(alignment: .topTrailing) {
+                ZStack(alignment: .bottomLeading) {
+                    if previewsEnabled, let preview {
+                        Image(nsImage: preview)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: 130)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+                            )
+                    } else {
+                        VStack(spacing: 0) {
+                            HStack(spacing: 4) {
+                                Circle().fill(Color.red.opacity(0.7)).frame(width: 6, height: 6)
+                                Circle().fill(Color.yellow.opacity(0.7)).frame(width: 6, height: 6)
+                                Circle().fill(Color.green.opacity(0.7)).frame(width: 6, height: 6)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.top, 6)
+                            .padding(.bottom, 4)
+                            .background(Color.white.opacity(0.04))
+
+                            Spacer()
+
+                            Image(nsImage: option.icon)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 44, height: 44)
+                                .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 80)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color.black.opacity(0.35))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                        )
+                    }
+
+                    Image(nsImage: option.icon)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 22, height: 22)
+                        .padding(4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.9))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                        )
+                        .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+                        .padding(6)
+                }
+
+                if let selectionNumber {
+                    HStack(spacing: 2) {
+                        Text("Slot")
+                            .font(.system(size: 9, weight: .medium))
+                            .opacity(0.8)
+                        Text("\(selectionNumber)")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(LinearGradient(colors: [Color.cyan, Color.blue], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    )
+                    .shadow(color: Color.cyan.opacity(0.5), radius: 4, y: 1)
+                    .padding(6)
+                }
+            }
+
+            if tooWideToShare {
+                Label("Needs \(Int(option.minimumWidth)) pt", systemImage: "arrow.left.and.right.square")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.16), in: Capsule())
+                    .foregroundStyle(.orange)
+            }
+
+            if !option.groups.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(option.groups) { grp in
+                            HStack(spacing: 3) {
+                                Circle()
+                                    .fill(GroupPalette.color(at: grp.colorIndex))
+                                    .frame(width: 5, height: 5)
+                                Text(grp.name)
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                GroupPalette.color(at: grp.colorIndex).opacity(0.18),
+                                in: Capsule()
+                            )
+                            .overlay(
+                                Capsule().strokeBorder(GroupPalette.color(at: grp.colorIndex).opacity(0.5), lineWidth: 0.5)
+                            )
+                            .foregroundStyle(GroupPalette.color(at: grp.colorIndex))
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+                .frame(height: 18)
+            }
+
+            VStack(spacing: 2) {
+                Text(option.title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                HStack(spacing: 4) {
+                    Text(option.appName)
+                    if option.isMinimized { Text("• Minimized") }
+                    else if option.isFullScreen { Text("• Full Screen") }
+                }
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity)
+        .frame(height: previewsEnabled ? 205 : 155)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    selectionNumber != nil
+                        ? Color.accentColor.opacity(0.14)
+                        : (!option.groups.isEmpty
+                            ? GroupPalette.color(at: option.groups.first!.colorIndex).opacity(0.08)
+                            : Color.white.opacity(0.04))
+                )
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(
+                    selectionNumber != nil
+                        ? Color.accentColor.opacity(0.85)
+                        : (isFocused
+                            ? Color.accentColor.opacity(0.6)
+                            : (!option.groups.isEmpty
+                                ? GroupPalette.color(at: option.groups.first!.colorIndex).opacity(0.35)
+                                : Color.white.opacity(0.08))),
+                    lineWidth: selectionNumber != nil || isFocused ? 1.5 : 1
+                )
+        }
+        .shadow(color: selectionNumber != nil ? Color.accentColor.opacity(0.2) : .clear, radius: 8, y: 2)
+    }
+}
+
+private struct InteractiveColumnDivider: View {
+    let index: Int
+    let totalWidth: CGFloat
+    @ObservedObject var model: WindowSwitcherModel
+    @State private var isHovered = false
+    @State private var dragAccumulator: CGFloat = 0
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.clear)
+                .frame(width: 14, height: 42)
+                .contentShape(Rectangle())
+
+            Capsule()
+                .fill(isHovered ? Color.cyan : Color.cyan.opacity(0.7))
+                .frame(width: isHovered ? 4 : 2, height: 28)
+                .shadow(color: Color.cyan.opacity(isHovered ? 0.9 : 0.5), radius: isHovered ? 4 : 2)
+        }
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering {
+                NSCursor.resizeLeftRight.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        .gesture(
+            DragGesture()
+                .onChanged { value in
+                    let delta = value.translation.width - dragAccumulator
+                    dragAccumulator = value.translation.width
+                    if abs(delta) > 0.5 {
+                        let deltaRatio = delta / max(100, totalWidth)
+                        model.adjustSplitRatio(at: index, delta: deltaRatio)
+                    }
+                }
+                .onEnded { _ in
+                    dragAccumulator = 0
+                }
+        )
+        .help("Drag to adjust column split ratio")
+    }
+}
+
+private struct ModernColumnDock: View {
+    @ObservedObject var model: WindowSwitcherModel
+    @State private var targetedIndex: Int?
+
+    var body: some View {
+        if let plan = model.layoutPlan, plan.columns.count >= 2 {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Label("Live Column Preview", systemImage: "rectangle.split.3x1")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    if model.customRatios != nil {
+                        Button {
+                            model.resetCustomRatios()
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.counterclockwise")
+                                    .font(.system(size: 9))
+                                Text("Reset Equal")
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.white.opacity(0.08), in: Capsule())
+                            .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Reset to equal column widths")
+                    }
+
+                    Spacer()
+
+                    Text(plan.columns.map { "Col \($0.position): \(Int($0.widthFraction * 100))%" }.joined(separator: " | "))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.cyan)
+                }
+
+                GeometryReader { geo in
+                    let totalWidth = geo.size.width
+                    let dividerCount = CGFloat(plan.columns.count - 1)
+                    let availableWidth = max(50, totalWidth - dividerCount * 14)
+
+                    HStack(spacing: 0) {
+                        ForEach(Array(plan.columns.enumerated()), id: \.element.id) { idx, col in
+                            let option = model.options.first { $0.id == col.id }
+                            let colWidth = max(50, availableWidth * col.widthFraction)
+
+                            HStack(spacing: 4) {
+                                if idx > 0 {
+                                    Button {
+                                        model.movePhysicalColumn(at: idx, offset: -1)
+                                    } label: {
+                                        Image(systemName: "chevron.left")
+                                            .font(.system(size: 8, weight: .bold))
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 14, height: 26)
+                                            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 4))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Move pane left")
+                                }
+
+                                if let option {
+                                    Image(nsImage: option.icon)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 18, height: 18)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(option.appName)
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .lineLimit(1)
+                                        Text("\(Int(col.widthFraction * 100))% · \(col.points)pt")
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+
+                                Spacer(minLength: 2)
+
+                                if idx < plan.columns.count - 1 {
+                                    Button {
+                                        model.movePhysicalColumn(at: idx, offset: 1)
+                                    } label: {
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 8, weight: .bold))
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 14, height: 26)
+                                            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 4))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Move pane right")
+                                }
+
+                                Button {
+                                    model.detach(col.id)
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 16, height: 26)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.horizontal, 6)
+                            .frame(width: colWidth, height: 42)
+                            .background(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(targetedIndex == idx ? Color.cyan.opacity(0.2) : Color.white.opacity(0.06))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .stroke(targetedIndex == idx ? Color.cyan : Color.white.opacity(0.12), lineWidth: 0.5)
+                            )
+                            .draggable(col.id.uuidString)
+                            .dropDestination(for: String.self) { items, _ in
+                                guard let draggedIDString = items.first,
+                                      let draggedID = UUID(uuidString: draggedIDString),
+                                      let sourceIdx = plan.columns.firstIndex(where: { $0.id == draggedID }) else { return false }
+                                model.reorderPhysicalColumns(from: sourceIdx, to: idx)
+                                return true
+                            } isTargeted: { targeted in
+                                if targeted {
+                                    targetedIndex = idx
+                                } else if targetedIndex == idx {
+                                    targetedIndex = nil
+                                }
+                            }
+
+                            if idx < plan.columns.count - 1 {
+                                InteractiveColumnDivider(index: idx, totalWidth: availableWidth, model: model)
+                            }
+                        }
+                    }
+                    .frame(width: totalWidth, height: 42, alignment: .leading)
+                }
+                .frame(height: 42)
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.black.opacity(0.35))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            )
+        }
+    }
+}
+
 /// A proportional picture of the arrangement the current selection produces.
 ///
 /// This replaced a horizontal strip of chips that repeated the numbers already
@@ -677,6 +1641,18 @@ private struct ChooserSettingsMenu: View {
 
     var body: some View {
         Menu {
+            Picker("Design Style", selection: Binding(
+                get: { model.switcherDesignStyle },
+                set: { model.setSwitcherDesignStyle($0) }
+            )) {
+                ForEach(SwitcherDesignStyle.allCases) { style in
+                    Text(style.label).tag(style)
+                }
+            }
+            .pickerStyle(.inline)
+
+            Divider()
+
             Picker("Appearance", selection: Binding(
                 get: { model.appearance },
                 set: { model.setAppearance($0) }
@@ -991,21 +1967,28 @@ private struct WindowOptionCard: View {
                     .foregroundStyle(.orange)
                     .help("This window will not go narrow enough to share the display evenly")
             }
-            if let groupName = option.groupName, let colorIndex = option.groupColorIndex {
-                HStack(spacing: 5) {
-                    Circle().fill(GroupPalette.color(at: colorIndex)).frame(width: 7, height: 7)
-                    Text(groupName)
+            if !option.groups.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(option.groups) { grp in
+                            HStack(spacing: 5) {
+                                Circle().fill(GroupPalette.color(at: grp.colorIndex)).frame(width: 7, height: 7)
+                                Text(grp.name)
+                            }
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(GroupPalette.color(at: grp.colorIndex).opacity(0.12), in: Capsule())
+                        }
+                    }
                 }
-                .font(.caption2.weight(.semibold))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(GroupPalette.color(at: colorIndex).opacity(0.12), in: Capsule())
             }
             VStack(spacing: 2) {
                 Text(option.title).font(.subheadline.weight(.semibold)).lineLimit(2)
                 HStack(spacing: 4) {
                     Text(option.appName)
                     if option.isMinimized { Text("• Minimized") }
+                    else if option.isFullScreen { Text("• Full Screen") }
                 }
                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -1030,6 +2013,8 @@ final class WindowSwitcherController {
     private let coordinator: WindowCoordinator
     private let appModel: AppModel
     private var keyMonitor: Any?
+    private var outsideClickMonitor: Any?
+    private var resignObserver: NSObjectProtocol?
     private var pendingCreateNewGroup = false
     private var metrics = ChooserMetrics.resolve(
         optionCount: 0, hasGroups: false, previews: true, reservesPreview: false, on: nil
@@ -1049,12 +2034,28 @@ final class WindowSwitcherController {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.level = .floating
+        panel.hidesOnDeactivate = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.close()
+            }
+        }
         model.dismiss = { [weak self] in self?.close() }
         model.openSettings = { [weak self] in
             self?.close()
             SettingsWindow.open(model: appModel)
         }
+    }
+
+    deinit {
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
     }
 
     func show(createNewGroup: Bool = false) {
@@ -1087,13 +2088,29 @@ final class WindowSwitcherController {
         )
         present(width: metrics.width, height: metrics.height)
         installKeyMonitor()
+        installOutsideClickMonitor()
     }
 
     func close() {
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
+        if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
+        outsideClickMonitor = nil
         panel.orderOut(nil)
         model.unload()
+    }
+
+    private func installOutsideClickMonitor() {
+        if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.panel.isVisible else { return }
+                let clickLocation = NSEvent.mouseLocation
+                if !self.panel.frame.contains(clickLocation) {
+                    self.close()
+                }
+            }
+        }
     }
 
     /// Puts the caret in the search field, ending a rename if one is running.
@@ -1249,7 +2266,11 @@ final class StatusBarController: NSObject {
             menu.addItem(.separator())
         }
         menu.addItem(withTitle: "Choose Windows", action: #selector(showSwitcher), keyEquivalent: "")
-        menu.addItem(withTitle: "New Group — Control twice", action: #selector(createGroup), keyEquivalent: "")
+        let doubleTapModifier = appModel.store.preferences.doubleTapModifier
+        let newGroupTitle = doubleTapModifier == .off
+            ? "New Group"
+            : "New Group — \(doubleTapModifier.label) twice"
+        menu.addItem(withTitle: newGroupTitle, action: #selector(createGroup), keyEquivalent: "")
         if !appModel.coordinator.groups.isEmpty {
             menu.addItem(.separator())
             for group in appModel.coordinator.groups {
@@ -1324,7 +2345,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Task { @MainActor in
             self.applicationIconController = ApplicationIconController()
-            NSApp.setActivationPolicy(.accessory)
+            let targetPolicy: NSApplication.ActivationPolicy = AppModel.shared.store.preferences.showDockIcon ? .regular : .accessory
+            NSApp.setActivationPolicy(targetPolicy)
             self.statusBarController = StatusBarController(model: AppModel.shared)
             self.groupHostManager = GroupHostManager(coordinator: AppModel.shared.coordinator)
             self.dividerOverlayController = DividerOverlayController(coordinator: AppModel.shared.coordinator)

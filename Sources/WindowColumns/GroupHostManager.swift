@@ -204,7 +204,7 @@ final class GroupHostManager {
         }
 
         let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = false
+        configuration.activates = bringForward
         configuration.addsToRecentItems = false
         configuration.arguments = [
             "--group-id", group.id.uuidString,
@@ -222,7 +222,7 @@ final class GroupHostManager {
                 self.running[group.id] = application
                 self.groupIDByPID[application.processIdentifier] = group.id
                 if bringForward {
-                    application.activate()
+                    application.activate(options: [.activateIgnoringOtherApps])
                 }
             }
         }

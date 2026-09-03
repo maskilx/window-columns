@@ -47,16 +47,21 @@ let observer = DistributedNotificationCenter.default().addObserver(
     // as the donor for cooperative activation.
     guard let value = notification.object as? String else { return }
     let parts = value.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
-    receivedGroupID = String(parts[0])
-    receivedHelperPID = parts.count > 1 ? pid_t(String(parts[1])) : nil
+    let groupID = String(parts[0])
+    let helperPID = parts.count > 1 ? pid_t(String(parts[1])) : nil
 
-    // Stand in for the controller so the helper does not hide itself.
-    DistributedNotificationCenter.default().postNotificationName(
-        activationSucceeded,
-        object: receivedGroupID,
-        userInfo: nil,
-        deliverImmediately: true
-    )
+    Task { @MainActor in
+        receivedGroupID = groupID
+        receivedHelperPID = helperPID
+
+        // Stand in for the controller so the helper does not hide itself.
+        DistributedNotificationCenter.default().postNotificationName(
+            activationSucceeded,
+            object: groupID,
+            userInfo: nil,
+            deliverImmediately: true
+        )
+    }
 }
 
 let configuration = NSWorkspace.OpenConfiguration()
@@ -70,8 +75,10 @@ configuration.arguments = [
 ]
 
 NSWorkspace.shared.openApplication(at: helperURL, configuration: configuration) { application, error in
-    launchedApplication = application
-    launchError = error
+    Task { @MainActor in
+        launchedApplication = application
+        launchError = error
+    }
 }
 
 // The helper suppresses activations for the first second after launch so a

@@ -8,6 +8,7 @@ private let activationFailed = Notification.Name("com.adimaskil.WindowColumns.ac
 private let groupRenamed = Notification.Name("com.adimaskil.WindowColumns.groupRenamed")
 private let companionQuitting = Notification.Name("com.adimaskil.WindowColumns.companionQuitting")
 private let minimizeRequest = Notification.Name("com.adimaskil.WindowColumns.minimizeGroup")
+private let groupMinimized = Notification.Name("com.adimaskil.WindowColumns.groupMinimized")
 
 /// A window group's Dock and Command-Tab stand-in.
 ///
@@ -20,7 +21,8 @@ private let minimizeRequest = Notification.Name("com.adimaskil.WindowColumns.min
 final class GroupHostDelegate: NSObject, NSApplicationDelegate {
     private let groupID: String
     private var groupName: String
-    private let suppressActivationsUntil: Date
+    private var suppressActivationsUntil: Date
+    private var isGroupMinimized = false
     private var handoffTimeout: DispatchWorkItem?
     private var lastRequest = Date.distantPast
     /// Set when this helper is shutting down because the controller went away,
@@ -94,9 +96,23 @@ final class GroupHostDelegate: NSObject, NSApplicationDelegate {
                 queue: .main
             ) { [weak self] notification in
                 guard notification.object as? String == self?.groupID else { return }
-                Task { @MainActor in self?.handoffCompleted(restored: handled) }
+                Task { @MainActor in
+                    if handled { self?.isGroupMinimized = false }
+                    self?.handoffCompleted(restored: handled)
+                }
             })
         }
+        observers.append(DistributedNotificationCenter.default().addObserver(
+            forName: groupMinimized,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self, notification.object as? String == self.groupID else { return }
+            Task { @MainActor in
+                self.isGroupMinimized = true
+                self.suppressActivationsUntil = Date().addingTimeInterval(3.0)
+            }
+        })
     }
 
     /// Quitting the companion dismantles its group — that is the point of the
@@ -118,7 +134,16 @@ final class GroupHostDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        guard Date() >= suppressActivationsUntil else { return }
+        if isGroupMinimized || Date() < suppressActivationsUntil {
+            // macOS automatically activated this companion or the user Command-Tabbed past it
+            // while the group is minimized. Do not restore the group!
+            // Activate Finder so macOS moves focus away from this companion.
+            if let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first {
+                finder.activate(options: [.activateIgnoringOtherApps])
+            }
+            NSApp.hide(nil)
+            return
+        }
         requestGroupActivation()
     }
 
@@ -126,8 +151,9 @@ final class GroupHostDelegate: NSObject, NSApplicationDelegate {
         _ sender: NSApplication,
         hasVisibleWindows flag: Bool
     ) -> Bool {
-        // Clicking the Dock tile while this helper is already frontmost produces
-        // no activation notification, so re-raise the group from here too.
+        // Clicking the Dock tile explicitly requests un-minimizing / restoring the group!
+        isGroupMinimized = false
+        suppressActivationsUntil = Date.distantPast
         requestGroupActivation()
         return true
     }
@@ -190,6 +216,8 @@ final class GroupHostDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showGroup() {
+        isGroupMinimized = false
+        suppressActivationsUntil = Date.distantPast
         requestGroupActivation()
     }
 
@@ -242,8 +270,11 @@ final class GroupHostDelegate: NSObject, NSApplicationDelegate {
         handoffTimeout = nil
         // On success the group's own application takes the foreground and there
         // is nothing left to do. On failure this helper is still frontmost with
-        // no windows; hiding returns activation to the previous application.
+        // no windows; activating Finder returns focus to the desktop/previous apps.
         guard !restored, NSApp.isActive else { return }
+        if let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first {
+            finder.activate(options: [.activateIgnoringOtherApps])
+        }
         NSApp.hide(nil)
     }
 

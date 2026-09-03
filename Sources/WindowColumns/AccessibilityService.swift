@@ -1,5 +1,5 @@
 import AppKit
-import ApplicationServices
+@preconcurrency import ApplicationServices
 import Foundation
 
 // AX frame operations are safe to issue from the dedicated serial resize queue.
@@ -65,9 +65,9 @@ final class AccessibilityService: @unchecked Sendable {
                 seenElements.append(element)
                 let title: String = copyAttribute(kAXTitleAttribute as CFString, from: element) ?? "Untitled Window"
                 let minimized: Bool = copyAttribute(kAXMinimizedAttribute as CFString, from: element) ?? false
+                let fullScreen = isFullScreen(element)
 
-                guard isSettable(kAXPositionAttribute as CFString, on: element),
-                      isSettable(kAXSizeAttribute as CFString, on: element),
+                guard (isSettable(kAXPositionAttribute as CFString, on: element) && isSettable(kAXSizeAttribute as CFString, on: element)) || fullScreen,
                       let frame = frame(of: element) else {
                     unsupported.append("\(app.localizedName ?? "Application") — \(title)")
                     continue
@@ -108,6 +108,7 @@ final class AccessibilityService: @unchecked Sendable {
                     frame: frame,
                     minimumSize: minimumSize(of: element),
                     isMinimized: minimized,
+                    isFullScreen: fullScreen,
                     isSelected: old?.isSelected ?? false
                 ))
             }
@@ -156,9 +157,6 @@ final class AccessibilityService: @unchecked Sendable {
     }
 
     func setFrame(_ cocoaFrame: CGRect, of element: AXUIElement) throws -> CGRect {
-        if isSettable(kAXMinimizedAttribute as CFString, on: element) {
-            AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
-        }
         let current = frame(of: element)
         let axFrame = CoordinateConverter.cocoaToAccessibility(cocoaFrame)
         var position = axFrame.origin
@@ -223,11 +221,24 @@ final class AccessibilityService: @unchecked Sendable {
         AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
     }
 
+    /// Checks whether a window is minimized.
+    func isMinimized(_ element: AXUIElement) -> Bool {
+        copyAttribute(kAXMinimizedAttribute as CFString, from: element) ?? false
+    }
+
     /// Restores a minimized window. A minimized window cannot be raised or
     /// resized, so this has to happen before any layout pass.
     func unminimize(_ element: AXUIElement) {
         guard isSettable(kAXMinimizedAttribute as CFString, on: element) else { return }
         AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+    }
+
+    /// Checks whether a window is in native macOS full-screen mode.
+    func isFullScreen(_ element: AXUIElement) -> Bool {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, "AXFullScreen" as CFString, &value)
+        guard result == .success, let boolValue = value as? Bool else { return false }
+        return boolValue
     }
 
     /// Window numbers of the on-screen windows, front to back.
@@ -278,16 +289,7 @@ final class AccessibilityService: @unchecked Sendable {
         ), let managed = windows.first(where: { CFEqual($0.element, focused) }) else {
             return false
         }
-        guard let windowID = managed.windowID else {
-            return !managed.isMinimized
-        }
-        guard let visibleWindows = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements],
-            kCGNullWindowID
-        ) as? [[String: Any]] else { return false }
-        return visibleWindows.contains {
-            ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == windowID
-        }
+        return !managed.isMinimized
     }
 
     func observe(_ windows: [ManagedWindow], handler: @escaping (AXUIElement, String) -> Void) {
@@ -311,6 +313,7 @@ final class AccessibilityService: @unchecked Sendable {
                 AXObserverAddNotification(observer, window.element, kAXWindowResizedNotification as CFString, pointer)
                 AXObserverAddNotification(observer, window.element, kAXWindowMovedNotification as CFString, pointer)
                 AXObserverAddNotification(observer, window.element, kAXUIElementDestroyedNotification as CFString, pointer)
+                AXObserverAddNotification(observer, window.element, kAXWindowMiniaturizedNotification as CFString, pointer)
             }
             CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
             observers[pid] = ObserverRecord(observer: observer, context: context)
@@ -417,7 +420,26 @@ private func accessibilityObserverCallback(
 }
 
 enum CoordinateConverter {
-    private static var primaryTop: CGFloat { NSScreen.screens.first?.frame.maxY ?? 0 }
+    private static let topLock = NSLock()
+    private nonisolated(unsafe) static var _cachedPrimaryTop: CGFloat = {
+        if Thread.isMainThread {
+            return NSScreen.screens.first?.frame.maxY ?? 0
+        }
+        return 0
+    }()
+
+    private static var primaryTop: CGFloat {
+        if Thread.isMainThread {
+            let top = NSScreen.screens.first?.frame.maxY ?? 0
+            topLock.lock()
+            _cachedPrimaryTop = top
+            topLock.unlock()
+            return top
+        }
+        topLock.lock()
+        defer { topLock.unlock() }
+        return _cachedPrimaryTop
+    }
 
     static func accessibilityToCocoa(_ frame: CGRect) -> CGRect {
         CGRect(x: frame.minX, y: primaryTop - frame.minY - frame.height, width: frame.width, height: frame.height)

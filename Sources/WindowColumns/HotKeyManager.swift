@@ -12,10 +12,12 @@ final class HotKeyManager {
     private var eventHandler: EventHandlerRef?
     private var globalModifierMonitor: Any?
     private var localModifierMonitor: Any?
+    private var globalKeyDownMonitor: Any?
+    private var localKeyDownMonitor: Any?
     private var controlIsDown = false
     private var lastControlPress: TimeInterval = 0
     private var doubleTapModifier: DoubleTapModifier = .control
-    private let signature: OSType = 0x57434F4C // "WCOL"
+    fileprivate let signature: OSType = 0x57434F4C // "WCOL"
 
     /// Registers every configured shortcut, replacing whatever was registered
     /// before. Safe to call whenever the user changes a binding.
@@ -120,6 +122,17 @@ final class HotKeyManager {
             self?.handleModifierChange(event)
             return event
         }
+        if globalKeyDownMonitor == nil {
+            globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
+                self?.lastControlPress = 0
+            }
+        }
+        if localKeyDownMonitor == nil {
+            localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                self?.lastControlPress = 0
+                return event
+            }
+        }
     }
 
     func stop() {
@@ -128,8 +141,12 @@ final class HotKeyManager {
         eventHandler = nil
         if let globalModifierMonitor { NSEvent.removeMonitor(globalModifierMonitor) }
         if let localModifierMonitor { NSEvent.removeMonitor(localModifierMonitor) }
+        if let globalKeyDownMonitor { NSEvent.removeMonitor(globalKeyDownMonitor) }
+        if let localKeyDownMonitor { NSEvent.removeMonitor(localKeyDownMonitor) }
         globalModifierMonitor = nil
         localModifierMonitor = nil
+        globalKeyDownMonitor = nil
+        localKeyDownMonitor = nil
     }
 
     private func handleModifierChange(_ event: NSEvent) {
@@ -174,16 +191,23 @@ private func windowColumnsHotKeyCallback(
     )
     guard status == noErr else { return OSStatus(eventNotHandledErr) }
     let manager = Unmanaged<HotKeyManager>.fromOpaque(userData).takeUnretainedValue()
+    guard identifier.signature == manager.signature else {
+        return OSStatus(eventNotHandledErr)
+    }
     let id = identifier.id
-    DispatchQueue.main.async {
-        switch id {
-        case HotKeyManager.Identifier.undo: manager.undoHandler?()
-        case HotKeyManager.Identifier.openChooser: manager.openChooserHandler?()
-        case HotKeyManager.Identifier.createGroup: manager.createGroupHandler?()
-        case HotKeyManager.Identifier.minimizeGroup: manager.minimizeGroupHandler?()
-        case 2...9: manager.handler?(Int(id))
-        default: break
-        }
+    switch id {
+    case HotKeyManager.Identifier.undo:
+        DispatchQueue.main.async { manager.undoHandler?() }
+    case HotKeyManager.Identifier.openChooser:
+        DispatchQueue.main.async { manager.openChooserHandler?() }
+    case HotKeyManager.Identifier.createGroup:
+        DispatchQueue.main.async { manager.createGroupHandler?() }
+    case HotKeyManager.Identifier.minimizeGroup:
+        DispatchQueue.main.async { manager.minimizeGroupHandler?() }
+    case 2...9:
+        DispatchQueue.main.async { manager.handler?(Int(id)) }
+    default:
+        return OSStatus(eventNotHandledErr)
     }
     return noErr
 }
