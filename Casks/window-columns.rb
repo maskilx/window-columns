@@ -1,6 +1,6 @@
 cask "window-columns" do
-  version "0.1.0-beta.1"
-  sha256 "101e6ca5eed0d5924cddb369406ce9e317bf4a4da3f3fe52d37d1382f0633cc4"
+  version "0.1.0-beta.2"
+  sha256 "e27fa4a50e7de7293ddb6efb3130d2bf0a53005c881840d9529aec0ac893904c"
 
   url "https://github.com/maskilx/window-columns/releases/download/v#{version}/Window-Columns-v#{version}-macos-arm64.zip"
   name "Window Columns"
