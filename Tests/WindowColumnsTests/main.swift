@@ -80,6 +80,7 @@ struct LayoutEngineChecks {
         checkDisplacementClassification()
         checkFit()
         checkGroupMinimizationState()
+        checkSemanticVersion()
 
         print("All core checks passed.")
     }
@@ -270,5 +271,63 @@ struct LayoutEngineChecks {
         let unnumbered3 = WindowFingerprint(bundleIdentifier: "com.brave.Browser", title: "Other", windowNumber: nil)
         precondition(unnumbered1.matches(unnumbered2))
         precondition(!unnumbered1.matches(unnumbered3))
+    }
+
+    private static func checkSemanticVersion() {
+        guard let v1 = SemanticVersion(string: "0.1.0-beta.1"),
+              let v2 = SemanticVersion(string: "v0.1.0-beta.2"),
+              let v10 = SemanticVersion(string: "0.1.0-beta.10"),
+              let vRelease = SemanticVersion(string: "0.1.0"),
+              let vPatch = SemanticVersion(string: "0.1.1"),
+              let vMinor = SemanticVersion(string: "0.2.0"),
+              let vBuild = SemanticVersion(string: "0.1.0-beta.2+build.123") else {
+            preconditionFailure("Failed to parse semantic versions")
+        }
+
+        // Parsing checks
+        precondition(v2.major == 0 && v2.minor == 1 && v2.patch == 0)
+        precondition(v2.isPrerelease)
+        precondition(!vRelease.isPrerelease)
+
+        // Equalities (ignoring 'v' prefix and build metadata)
+        precondition(v2 == vBuild)
+        precondition(SemanticVersion(string: "0.1.0-beta.2") == v2)
+
+        // Comparisons: SemVer 2.0 precedence
+        precondition(v1 < v2)
+        precondition(v2 < v10) // numeric ordering: 2 < 10
+        precondition(v10 < vRelease) // prerelease < normal release
+        precondition(vRelease < vPatch)
+        precondition(vPatch < vMinor)
+
+        // Textual vs numeric prerelease
+        guard let alpha = SemanticVersion(string: "1.0.0-alpha"),
+              let alpha1 = SemanticVersion(string: "1.0.0-alpha.1"),
+              let alphaBeta = SemanticVersion(string: "1.0.0-alpha.beta"),
+              let beta = SemanticVersion(string: "1.0.0-beta"),
+              let beta2 = SemanticVersion(string: "1.0.0-beta.2"),
+              let rc = SemanticVersion(string: "1.0.0-rc.1"),
+              let normal = SemanticVersion(string: "1.0.0") else {
+            preconditionFailure("Failed to parse SemVer 2.0 sequence")
+        }
+        precondition(alpha < alpha1)
+        precondition(alpha1 < alphaBeta)
+        precondition(alphaBeta < beta)
+        precondition(beta < beta2)
+        precondition(beta2 < rc)
+        precondition(rc < normal)
+
+        // AppVersion checks
+        precondition(AppVersion.current == "0.1.0-beta.3")
+        precondition(AppVersion.semantic == SemanticVersion(string: "0.1.0-beta.3")!)
+
+        // JSON Codable roundtrip
+        do {
+            let data = try JSONEncoder().encode(v2)
+            let decoded = try JSONDecoder().decode(SemanticVersion.self, from: data)
+            precondition(decoded == v2)
+        } catch {
+            preconditionFailure("JSON Codable failed for SemanticVersion: \(error)")
+        }
     }
 }

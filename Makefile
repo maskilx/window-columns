@@ -1,4 +1,4 @@
-.PHONY: build test verify test-helper test-runtime app install run signing-identity reset-permission clean
+.PHONY: build test verify test-helper test-runtime app install run signing-identity reset-permission unquarantine notarize clean
 
 build:
 	swift build
@@ -43,6 +43,15 @@ signing-identity:
 reset-permission:
 	tccutil reset Accessibility com.adimaskil.WindowColumns || true
 	@echo "Cleared. Launch the app and grant Accessibility again."
+
+# Removes Gatekeeper quarantine attributes from the installed application bundle.
+unquarantine:
+	xattr -dr com.apple.quarantine "/Applications/Window Columns.app" || true
+	@echo "Cleared Gatekeeper quarantine from /Applications/Window Columns.app"
+
+# Notarizes the app bundle with Apple's Notary service and staples the ticket.
+notarize:
+	sh Scripts/notarize.sh
 
 clean:
 	swift package clean

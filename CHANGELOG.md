@@ -8,6 +8,26 @@ While the project is in beta, compatibility may change between minor releases.
 
 ## [Unreleased]
 
+## [0.1.0-beta.3] - 2026-09-04
+
+### Added
+
+- Native "Check for Updates" feature:
+  - Queries GitHub Releases API directly for new beta and stable releases with zero third-party dependencies.
+  - Built-in SemVer 2.0 parser and comparator supporting prerelease precedence ordering.
+  - Interactive Software Update dialog displaying release notes, direct asset download, and Homebrew cask upgrade instructions.
+  - Menu Bar context menu, Chooser gear menu, and Settings (General tab) update controls with automatic background checking.
+- Menu Bar icon matching the application Dock icon:
+  - Replaced wireframe window icon with the high-resolution, full-color application Dock icon.
+  - Real-time appearance adaptation supporting Light and Dark modes with Retina sharpness.
+- Gatekeeper resolution across distribution channels:
+  - Added automatic `postflight` unquarantine hook to Homebrew Cask (`Casks/window-columns.rb`) to bypass Gatekeeper prompts on install.
+  - Added in-app `QuarantineRemover` to automatically clear quarantine attributes from the application bundle and all 9 companion helper apps on launch.
+  - Added Apple Hardened Runtime entitlements (`Resources/WindowColumns.entitlements`) and codesign support in `Scripts/build-app.sh`.
+  - Added automated Apple Notary submission and stapling script (`Scripts/notarize.sh`).
+  - Added `make unquarantine` target to `Makefile`.
+  - Updated first-launch guidance in `README.md` for macOS Sequoia (15+).
+
 ## [0.1.0-beta.2] - 2026-09-04
 
 ### Added
@@ -43,6 +63,7 @@ While the project is in beta, compatibility may change between minor releases.
 
 - Kept unrelated groups interactive when one or more other groups are minimized.
 
-[Unreleased]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.2...HEAD
+[Unreleased]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.3...HEAD
+[0.1.0-beta.3]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.2...v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.1...v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/maskilx/window-columns/releases/tag/v0.1.0-beta.1

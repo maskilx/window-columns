@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import WindowColumnsCore
 
 
 
@@ -140,6 +141,7 @@ struct SettingsView: View {
     @ObservedObject var model: AppModel
     @ObservedObject private var coordinator: WindowCoordinator
     @ObservedObject private var store: LayoutStore
+    @ObservedObject private var updateService = UpdateService.shared
     @State private var loginError: String?
 
     init(model: AppModel) {
@@ -223,6 +225,37 @@ struct SettingsView: View {
                     .buttonStyle(.link)
                     .font(.caption)
                 }
+            }
+
+            Section("Updates") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Window Columns \(AppVersion.current)")
+                            .fontWeight(.medium)
+                        if let lastCheck = store.preferences.lastUpdateCheckDate {
+                            Text("Last checked: \(lastCheck.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Text("Last checked: Never")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    if updateService.isChecking {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(.trailing, 4)
+                    }
+                    Button("Check for Updates") {
+                        model.checkForUpdates(interactive: true)
+                    }
+                    .disabled(updateService.isChecking)
+                }
+
+                Toggle("Automatically check for updates", isOn: Binding(
+                    get: { store.preferences.automaticallyChecksForUpdates },
+                    set: { store.preferences.automaticallyChecksForUpdates = $0 }
+                ))
             }
 
             Section("Layout") {

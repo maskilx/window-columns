@@ -2,15 +2,57 @@ import AppKit
 import SwiftUI
 
 enum MenuBarIcon {
-    static func make() -> NSImage {
+    /// Produces the menu bar status item icon matching the application's Dock icon.
+    /// Adapts to Light and Dark mode appearances, scaling sharply for Retina displays.
+    static func make(for appearance: NSAppearance? = nil) -> NSImage {
+        let isDark = (appearance ?? NSApp.effectiveAppearance).bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let resource = isDark ? "AppIcon-v3-Dark" : "AppIcon-v3-Light"
+
+        let loadedImage: NSImage? = {
+            if let url = Bundle.main.url(forResource: resource, withExtension: "png"),
+               let img = NSImage(contentsOf: url) {
+                return img
+            }
+            if let url = Bundle.main.url(forResource: "AppIcon-v3", withExtension: "icns"),
+               let img = NSImage(contentsOf: url) {
+                return img
+            }
+            // Fallback for development if running directly from Xcode/SPM without bundle resources
+            let projectResourceURL = URL(fileURLWithPath: #file)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Resources")
+                .appendingPathComponent("\(resource).png")
+            if let img = NSImage(contentsOf: projectResourceURL) {
+                return img
+            }
+            return NSApp.applicationIconImage
+        }()
+
+        guard let source = loadedImage else {
+            return fallbackWireframe()
+        }
+
+        let targetSize = NSSize(width: 18, height: 18)
+        let image = NSImage(size: targetSize, flipped: false) { rect in
+            source.draw(
+                in: rect,
+                from: NSRect(origin: .zero, size: source.size),
+                operation: .sourceOver,
+                fraction: 1.0
+            )
+            return true
+        }
+        image.isTemplate = false
+        image.accessibilityDescription = "Window Columns"
+        return image
+    }
+
+    /// Wireframe fallback in case image assets cannot be located.
+    private static func fallbackWireframe() -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
             let color = NSColor.labelColor
-
-            // A window divided into full-height columns. The previous mark was
-            // three free-standing bars with two connectors, which read as a
-            // picket fence; the enclosing frame is what makes it a window.
-            // Sized to sit at the same visual weight as neighbouring menu-bar
-            // items: a shorter, thinner mark reads as timid next to them.
             let frame = CGRect(x: 0.6, y: 3.0, width: 16.8, height: 12.0)
             let stroke: CGFloat = 1.6
             let outline = NSBezierPath(

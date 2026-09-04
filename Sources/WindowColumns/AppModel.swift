@@ -10,6 +10,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var rejectedShortcuts: [String] = []
     let coordinator: WindowCoordinator
     let store: LayoutStore
+    let updateService = UpdateService.shared
     private let hotKeys = HotKeyManager()
     var showCreateGroup: (() -> Void)?
     var showChooser: (() -> Void)?
@@ -104,5 +105,9 @@ final class AppModel: ObservableObject {
     func setLaunchAtLogin(_ enabled: Bool) throws {
         if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
         store.preferences.launchAtLogin = enabled
+    }
+
+    func checkForUpdates(interactive: Bool = true) {
+        updateService.checkForUpdates(store: store, interactive: interactive)
     }
 }

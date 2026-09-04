@@ -41,6 +41,13 @@ else
     STABLE_SIGNATURE=0
 fi
 
+# Hardened Runtime and timestamp are required by Apple Gatekeeper when signing
+# with an Apple Developer ID certificate.
+CODESIGN_EXTRA_FLAGS=""
+if echo "$SIGN_ID" | grep -q "Developer ID Application:" || [ "${HARDENED_RUNTIME:-0}" = "1" ]; then
+    CODESIGN_EXTRA_FLAGS="--options runtime --timestamp --entitlements $PROJECT_DIR/Resources/WindowColumns.entitlements"
+fi
+
 cd "$PROJECT_DIR"
 swift build --disable-sandbox -c "$CONFIGURATION" --product WindowColumns
 swift build --disable-sandbox -c "$CONFIGURATION" --product WindowColumnsGroupHost
@@ -65,12 +72,12 @@ while [ "$slot" -le 9 ]; do
     plutil -replace CFBundleName -string "WindowGroup$slot" "$HELPER_APP/Contents/Info.plist"
     plutil -replace CFBundleIdentifier -string "com.adimaskil.WindowColumns.Group$slot" "$HELPER_APP/Contents/Info.plist"
     xattr -cr "$HELPER_APP"
-    codesign --force --sign "$SIGN_ID" "$HELPER_APP"
+    codesign --force --sign "$SIGN_ID" $CODESIGN_EXTRA_FLAGS "$HELPER_APP"
     slot=$((slot + 1))
 done
 
 xattr -cr "$APP_DIR"
-codesign --force --sign "$SIGN_ID" "$APP_DIR"
+codesign --force --sign "$SIGN_ID" $CODESIGN_EXTRA_FLAGS "$APP_DIR"
 # File Provider may attach empty Finder metadata to the bundle immediately after
 # signing. Clear root metadata while leaving signed contents untouched.
 xattr -c "$APP_DIR"

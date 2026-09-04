@@ -141,6 +141,8 @@ struct LayoutPreferences: Codable, Equatable {
     var minimizeGroupShortcut: ShortcutBinding?
     /// Double-tapping this modifier opens the chooser in "create group" mode.
     var doubleTapModifier: DoubleTapModifier
+    var automaticallyChecksForUpdates: Bool
+    var lastUpdateCheckDate: Date?
 
     static let defaultColumnModifiers = NSEvent.ModifierFlags([.control, .option, .command]).rawValue
 
@@ -157,7 +159,9 @@ struct LayoutPreferences: Codable, Equatable {
         openChooserShortcut: ShortcutBinding? = nil,
         createGroupShortcut: ShortcutBinding? = nil,
         minimizeGroupShortcut: ShortcutBinding? = .minimizeGroupDefault,
-        doubleTapModifier: DoubleTapModifier = .control
+        doubleTapModifier: DoubleTapModifier = .control,
+        automaticallyChecksForUpdates: Bool = true,
+        lastUpdateCheckDate: Date? = nil
     ) {
         self.gap = gap
         self.launchAtLogin = launchAtLogin
@@ -172,12 +176,15 @@ struct LayoutPreferences: Codable, Equatable {
         self.createGroupShortcut = createGroupShortcut
         self.minimizeGroupShortcut = minimizeGroupShortcut
         self.doubleTapModifier = doubleTapModifier
+        self.automaticallyChecksForUpdates = automaticallyChecksForUpdates
+        self.lastUpdateCheckDate = lastUpdateCheckDate
     }
 
     private enum CodingKeys: String, CodingKey {
         case gap, launchAtLogin, showWindowPreviews, showDockIcon, appearance, switcherDesignStyle, geminiAPIKey
         case columnModifierFlags, undoShortcut, openChooserShortcut, createGroupShortcut
         case doubleTapModifier, minimizeGroupShortcut
+        case automaticallyChecksForUpdates, lastUpdateCheckDate
     }
 
     // Every key is optional on read so preferences written by an earlier build
@@ -200,6 +207,8 @@ struct LayoutPreferences: Codable, Equatable {
         doubleTapModifier = try container.decodeIfPresent(DoubleTapModifier.self, forKey: .doubleTapModifier) ?? .control
         minimizeGroupShortcut = try container.decodeIfPresent(ShortcutBinding.self, forKey: .minimizeGroupShortcut)
             ?? .minimizeGroupDefault
+        automaticallyChecksForUpdates = try container.decodeIfPresent(Bool.self, forKey: .automaticallyChecksForUpdates) ?? true
+        lastUpdateCheckDate = try container.decodeIfPresent(Date.self, forKey: .lastUpdateCheckDate)
     }
 }
 

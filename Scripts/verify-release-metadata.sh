@@ -24,4 +24,10 @@ if ! grep -Fq "## [$VERSION]" "$PROJECT_DIR/CHANGELOG.md"; then
     exit 1
 fi
 
+APP_VERSION=$(grep -E 'static let current = "[^"]+"' "$PROJECT_DIR/Sources/WindowColumnsCore/AppVersion.swift" | sed -E 's/.*"([^"]+)".*/\1/')
+if [ "$APP_VERSION" != "$VERSION" ]; then
+    echo "AppVersion.swift has version $APP_VERSION; expected $VERSION from VERSION" >&2
+    exit 1
+fi
+
 echo "Release metadata is consistent for $VERSION."

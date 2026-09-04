@@ -1,6 +1,6 @@
 cask "window-columns" do
-  version "0.1.0-beta.2"
-  sha256 "e27fa4a50e7de7293ddb6efb3130d2bf0a53005c881840d9529aec0ac893904c"
+  version "0.1.0-beta.3"
+  sha256 "bd9710f629172e877f74bd972edbcf8190092772cbd0c6e15f788487e0a66d94"
 
   url "https://github.com/maskilx/window-columns/releases/download/v#{version}/Window-Columns-v#{version}-macos-arm64.zip"
   name "Window Columns"
@@ -14,15 +14,20 @@ cask "window-columns" do
   depends_on arch: :arm64
   depends_on macos: :ventura
 
+  postflight do
+    system_command "xattr",
+                   args: ["-dr", "com.apple.quarantine", "#{appdir}/Window Columns.app"]
+  end
+
   app "Window Columns.app"
 
   caveats <<~EOS
-    Window Columns is an ad-hoc signed, unnotarised public beta. If Gatekeeper
-    blocks the first launch, Control-click the app in /Applications and choose
-    Open, or run:
+    Window Columns is an ad-hoc signed, unnotarised public beta. The cask automatically
+    removes the quarantine attribute so the app opens without Gatekeeper warnings.
+    If you encounter any issues on first launch, run:
 
       xattr -cr "/Applications/Window Columns.app"
 
-    Verify the release checksum before bypassing Gatekeeper.
+    Verify the release checksum before running the app.
   EOS
 end

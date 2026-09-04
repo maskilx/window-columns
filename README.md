@@ -5,13 +5,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/maskilx/window-columns/releases/download/v0.1.0-beta.2/Window-Columns-v0.1.0-beta.2-macos-arm64.zip">
+  <a href="https://github.com/maskilx/window-columns/releases/download/v0.1.0-beta.3/Window-Columns-v0.1.0-beta.3-macos-arm64.zip">
     <img src="https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-007AFF?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="Download Window Columns for macOS (Apple Silicon)">
   </a>
 </p>
 
 <p align="center">
-  <sub>First launch: if Gatekeeper blocks this unnotarised beta, right-click the app and choose <strong>Open</strong>, or run <code>xattr -cr "/Applications/Window Columns.app"</code>.</sub>
+  <sub>First launch: if Gatekeeper blocks this unnotarised beta, click <strong>Open Anyway</strong> in Privacy & Security or run <code>xattr -cr "/Applications/Window Columns.app"</code> (Homebrew installs bypass this automatically).</sub>
 </p>
 
 [![Public beta](https://img.shields.io/badge/status-public_beta-orange)](CHANGELOG.md)
@@ -25,7 +25,7 @@ entry so you can switch to a whole set of windows at once.
 It uses the Accessibility API directly — no scripting bridge, no third-party
 window manager, no background polling.
 
-> **Public beta:** the current source release is **0.1.0-beta.2**. It is built
+> **Public beta:** the current source release is **0.1.0-beta.3**. It is built
 > and used on macOS 26 on Apple silicon, but has not yet been tested across the
 > full macOS 13+ support range. Expect rough edges and please report them.
 
@@ -41,14 +41,21 @@ Selecting that icon brings **every window in the group** to the front at once,
 restoring their order, proportions and monitor — rather than raising one window
 at a time.
 
+- **Live Column Preview** — interactive dock preview in the switcher displaying
+  real-time column widths, proportional percentages, drag-and-drop column reordering,
+  and interactive divider dragging to customize split ratios. Fully adaptive to Light and Dark mode.
 - **Connected resizing** — drag the divider between two columns and the space is
   taken from its neighbour. Column widths always add up to the display.
 - **Snap back** — drag a grouped window out of place and it returns on release.
   Drag it past another column's centre and the two swap.
+- **Dynamic Menu Bar Icon** — high-resolution application icon that automatically
+  adapts to Light and Dark macOS appearances in real time.
 - **Minimize a whole group** from its Dock menu, or a shortcut. Selecting the
   group's icon brings it all back.
 - **Undo** an arrangement for two minutes afterwards, which puts every window
   back where it was and dismantles a group that was just created.
+- **Check for Updates** — native GitHub Releases update checker built into the
+  menu bar, chooser, and settings window.
 - Up to nine groups, each with its own colour and Command-Tab slot.
 
 ## Requirements
@@ -61,50 +68,43 @@ at a time.
 ### Prebuilt beta
 
 On an Apple silicon Mac, download
-`Window-Columns-v0.1.0-beta.2-macos-arm64.zip` from the
-[v0.1.0-beta.2 prerelease](https://github.com/maskilx/window-columns/releases/tag/v0.1.0-beta.2),
+`Window-Columns-v0.1.0-beta.3-macos-arm64.zip` from the
+[v0.1.0-beta.3 prerelease](https://github.com/maskilx/window-columns/releases/tag/v0.1.0-beta.3),
 extract it, and move **Window Columns.app** to `/Applications`.
 
 The prebuilt beta is arm64-only. Intel Mac users should build from source.
 
 > [!IMPORTANT]
-> **First launch: this beta is not notarised.** After moving the app to
-> `/Applications`, bypass Gatekeeper using either of these methods:
->
-> 1. In Finder, Control-click or right-click **Window Columns.app**, choose
->    **Open**, then confirm **Open**. This is only required on the first launch.
-> 2. Alternatively, remove the downloaded app's quarantine attributes in
->    Terminal, then open it normally:
->
->    ```sh
->    xattr -cr "/Applications/Window Columns.app"
->    ```
+> **First launch: this beta is not notarised.**
+> - **If installed via Homebrew Cask**: the cask automatically strips quarantine attributes during installation, so the app opens out of the box without Gatekeeper warnings.
+> - **If downloaded directly from GitHub Releases**:
+>   1. Open **System Settings → Privacy & Security**, scroll down to the Security section, and click **Open Anyway**; or
+>   2. Run this command in Terminal after moving the app to `/Applications`:
+>      ```sh
+>      xattr -cr "/Applications/Window Columns.app"
+>      ```
 >
 > Only do this after downloading from the official release and verifying its
-> SHA-256 checksum. The command recursively removes extended attributes from
-> this app bundle.
+> SHA-256 checksum. Once launched, Window Columns also automatically cleans
+> any quarantine flags from its nested companion helper apps.
 
 The beta bundle is ad-hoc signed and **not notarised by Apple**. macOS will warn
 the first time it opens. Review the source and attached SHA-256 checksum before
 running it. Building from source remains the most transparent installation
 path.
 
-### Homebrew cask (draft)
+### Homebrew cask (recommended)
 
-The repository includes an arm64-only draft cask in
-[`Casks/window-columns.rb`](Casks/window-columns.rb). Until a dedicated tap or
-official Homebrew integration is available, install it directly from this
-repository as a personal tap:
+The repository includes an arm64 cask in [`Casks/window-columns.rb`](Casks/window-columns.rb)
+configured to automatically strip quarantine attributes:
 
 ```sh
 brew tap maskilx/window-columns https://github.com/maskilx/window-columns
 brew install --cask maskilx/window-columns/window-columns
 ```
 
-Homebrew installs **Window Columns.app** into `/Applications`. The downloaded
-beta remains unnotarised, so follow the first-launch instructions above if
-Gatekeeper blocks it. This cask is pinned to `v0.1.0-beta.1`; later releases
-must update its version, URL and checksum before publication.
+Homebrew installs **Window Columns.app** into `/Applications` and clears Gatekeeper
+quarantine attributes via its `postflight` hook so the app works seamlessly out of the box.
 
 ### Build from source
 

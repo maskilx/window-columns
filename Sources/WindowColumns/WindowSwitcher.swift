@@ -86,6 +86,7 @@ final class WindowSwitcherModel: ObservableObject {
     private let appModel: AppModel
     var dismiss: (() -> Void)?
     var openSettings: (() -> Void)?
+    var checkForUpdates: (() -> Void)?
 
     var appearance: AppAppearance { store.preferences.appearance }
     func setAppearance(_ value: AppAppearance) {
@@ -759,6 +760,7 @@ struct WindowSwitcherView: View {
 
 struct ModernWindowSwitcherView: View {
     @ObservedObject var model: WindowSwitcherModel
+    @Environment(\.colorScheme) private var colorScheme
     let metrics: ChooserMetrics
     let onCancel: () -> Void
     let onFocusFilter: () -> Void
@@ -865,9 +867,9 @@ struct ModernWindowSwitcherView: View {
                 } else {
                     HStack(spacing: 6) {
                         shortcutPill("Return", label: "Select")
-                        Text("·").foregroundStyle(.white.opacity(0.3))
+                        Text("·").foregroundStyle(.secondary.opacity(0.6))
                         shortcutPill("⌘Return", label: "Group")
-                        Text("·").foregroundStyle(.white.opacity(0.3))
+                        Text("·").foregroundStyle(.secondary.opacity(0.6))
                         shortcutPill("Esc", label: "Close")
                     }
                 }
@@ -914,7 +916,10 @@ struct ModernWindowSwitcherView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                .stroke(
+                    colorScheme == .dark ? Color.white.opacity(0.14) : Color.black.opacity(0.1),
+                    lineWidth: 1
+                )
         }
     }
 
@@ -925,7 +930,14 @@ struct ModernWindowSwitcherView: View {
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                .background(
+                    colorScheme == .dark ? Color.white.opacity(0.08) : Color.primary.opacity(0.06),
+                    in: RoundedRectangle(cornerRadius: 4)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.08), lineWidth: 0.5)
+                )
                 .foregroundStyle(.primary)
             Text(label)
                 .font(.system(size: 10))
@@ -936,6 +948,7 @@ struct ModernWindowSwitcherView: View {
 
 private struct ModernGroupShelf: View {
     @ObservedObject var model: WindowSwitcherModel
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -961,16 +974,22 @@ private struct ModernGroupShelf: View {
                         } else {
                             Image(systemName: "sparkles")
                                 .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(Color.cyan)
+                                .foregroundStyle(Color.accentColor)
                         }
                         Text(model.isGeneratingNames ? "Thinking…" : "Suggest Names")
                             .font(.system(size: 10, weight: .medium))
                     }
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
-                    .background(Color.white.opacity(0.08), in: Capsule())
+                    .background(
+                        colorScheme == .dark ? Color.white.opacity(0.08) : Color.primary.opacity(0.06),
+                        in: Capsule()
+                    )
                     .overlay(
-                        Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                        Capsule().stroke(
+                            colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08),
+                            lineWidth: 0.5
+                        )
                     )
                 }
                 .buttonStyle(.plain)
@@ -988,7 +1007,7 @@ private struct ModernGroupShelf: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Image(systemName: "sparkles")
-                            .foregroundStyle(Color.cyan)
+                            .foregroundStyle(Color.accentColor)
                             .font(.system(size: 11))
                         Text("Suggested Group Names")
                             .font(.system(size: 11, weight: .semibold))
@@ -997,7 +1016,7 @@ private struct ModernGroupShelf: View {
                             model.acceptAllSuggestions()
                         }
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Color.cyan)
+                        .foregroundStyle(Color.accentColor)
                         .buttonStyle(.plain)
 
                         Text("·").foregroundStyle(.secondary)
@@ -1048,25 +1067,35 @@ private struct ModernGroupShelf: View {
                                     Image(systemName: "xmark")
                                         .font(.system(size: 8, weight: .bold))
                                         .padding(4)
-                                        .background(Color.white.opacity(0.1), in: Circle())
+                                        .background(
+                                            colorScheme == .dark ? Color.white.opacity(0.1) : Color.primary.opacity(0.08),
+                                            in: Circle()
+                                        )
                                         .foregroundStyle(.secondary)
                                 }
                                 .buttonStyle(.plain)
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                            .background(
+                                colorScheme == .dark ? Color.white.opacity(0.04) : Color.primary.opacity(0.04),
+                                in: RoundedRectangle(cornerRadius: 8)
+                            )
                         }
                     }
                 }
                 .padding(8)
                 .background(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.black.opacity(0.35))
+                        .fill(
+                            colorScheme == .dark
+                                ? Color.black.opacity(0.35)
+                                : Color(nsColor: .controlBackgroundColor).opacity(0.65)
+                        )
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.cyan.opacity(0.35), lineWidth: 1)
+                        .stroke(Color.accentColor.opacity(colorScheme == .dark ? 0.35 : 0.25), lineWidth: 1)
                 )
             }
             ScrollView(.horizontal, showsIndicators: false) {
@@ -1089,9 +1118,12 @@ private struct ModernGroupShelf: View {
                                                 .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
                                                 .overlay(
                                                     RoundedRectangle(cornerRadius: 6)
-                                                        .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                                                        .stroke(
+                                                            colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.1),
+                                                            lineWidth: 0.5
+                                                        )
                                                 )
-                                                .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+                                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.08), radius: 2, y: 1)
                                                 .zIndex(Double(4 - idx))
                                         }
                                     }
@@ -1141,12 +1173,18 @@ private struct ModernGroupShelf: View {
                         .padding(.vertical, 8)
                         .background(
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(isActive ? Color.accentColor.opacity(0.12) : Color.white.opacity(0.06))
+                                .fill(
+                                    isActive
+                                        ? Color.accentColor.opacity(colorScheme == .dark ? 0.14 : 0.09)
+                                        : (colorScheme == .dark ? Color.white.opacity(0.06) : Color(nsColor: .controlBackgroundColor).opacity(0.65))
+                                )
                         )
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
                                 .strokeBorder(
-                                    isActive ? Color.accentColor.opacity(0.6) : Color.white.opacity(0.12),
+                                    isActive
+                                        ? Color.accentColor.opacity(0.6)
+                                        : (colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)),
                                     lineWidth: 1
                                 )
                         }
@@ -1162,6 +1200,7 @@ private struct ModernGroupShelf: View {
         }
     }
 
+
     private func memberOptions(for group: WindowGroupSnapshot) -> [WindowSwitcherModel.Option] {
         model.options.filter { $0.groupID == group.id }
     }
@@ -1175,6 +1214,7 @@ private struct ModernWindowOptionCard: View {
     let isFocused: Bool
     let previewsEnabled: Bool
     let tooWideToShare: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 8) {
@@ -1188,7 +1228,10 @@ private struct ModernWindowOptionCard: View {
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+                                    .stroke(
+                                        colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.08),
+                                        lineWidth: 0.5
+                                    )
                             )
                     } else {
                         VStack(spacing: 0) {
@@ -1201,7 +1244,7 @@ private struct ModernWindowOptionCard: View {
                             .padding(.horizontal, 8)
                             .padding(.top, 6)
                             .padding(.bottom, 4)
-                            .background(Color.white.opacity(0.04))
+                            .background(colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.03))
 
                             Spacer()
 
@@ -1217,11 +1260,18 @@ private struct ModernWindowOptionCard: View {
                         .frame(height: 80)
                         .background(
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color.black.opacity(0.35))
+                                .fill(
+                                    colorScheme == .dark
+                                        ? Color.black.opacity(0.35)
+                                        : Color(nsColor: .controlBackgroundColor).opacity(0.55)
+                                )
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                                .stroke(
+                                    colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06),
+                                    lineWidth: 0.5
+                                )
                         )
                     }
 
@@ -1236,9 +1286,12 @@ private struct ModernWindowOptionCard: View {
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                                .stroke(
+                                    colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.1),
+                                    lineWidth: 0.5
+                                )
                         )
-                        .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.08), radius: 2, y: 1)
                         .padding(6)
                 }
 
@@ -1255,9 +1308,9 @@ private struct ModernWindowOptionCard: View {
                     .padding(.vertical, 3)
                     .background(
                         Capsule()
-                            .fill(LinearGradient(colors: [Color.cyan, Color.blue], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .fill(LinearGradient(colors: [Color.accentColor, Color.blue], startPoint: .topLeading, endPoint: .bottomTrailing))
                     )
-                    .shadow(color: Color.cyan.opacity(0.5), radius: 4, y: 1)
+                    .shadow(color: Color.accentColor.opacity(0.5), radius: 4, y: 1)
                     .padding(6)
                 }
             }
@@ -1320,10 +1373,10 @@ private struct ModernWindowOptionCard: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(
                     selectionNumber != nil
-                        ? Color.accentColor.opacity(0.14)
+                        ? Color.accentColor.opacity(colorScheme == .dark ? 0.14 : 0.1)
                         : (!option.groups.isEmpty
-                            ? GroupPalette.color(at: option.groups.first!.colorIndex).opacity(0.08)
-                            : Color.white.opacity(0.04))
+                            ? GroupPalette.color(at: option.groups.first!.colorIndex).opacity(colorScheme == .dark ? 0.08 : 0.06)
+                            : (colorScheme == .dark ? Color.white.opacity(0.04) : Color(nsColor: .controlBackgroundColor).opacity(0.65)))
                 )
         )
         .overlay {
@@ -1335,11 +1388,17 @@ private struct ModernWindowOptionCard: View {
                             ? Color.accentColor.opacity(0.6)
                             : (!option.groups.isEmpty
                                 ? GroupPalette.color(at: option.groups.first!.colorIndex).opacity(0.35)
-                                : Color.white.opacity(0.08))),
+                                : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)))),
                     lineWidth: selectionNumber != nil || isFocused ? 1.5 : 1
                 )
         }
-        .shadow(color: selectionNumber != nil ? Color.accentColor.opacity(0.2) : .clear, radius: 8, y: 2)
+        .shadow(
+            color: selectionNumber != nil
+                ? Color.accentColor.opacity(0.2)
+                : (colorScheme == .dark ? Color.clear : Color.black.opacity(0.03)),
+            radius: selectionNumber != nil ? 8 : 4,
+            y: 2
+        )
     }
 }
 
@@ -1347,6 +1406,7 @@ private struct InteractiveColumnDivider: View {
     let index: Int
     let totalWidth: CGFloat
     @ObservedObject var model: WindowSwitcherModel
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isHovered = false
     @State private var dragAccumulator: CGFloat = 0
 
@@ -1358,9 +1418,13 @@ private struct InteractiveColumnDivider: View {
                 .contentShape(Rectangle())
 
             Capsule()
-                .fill(isHovered ? Color.cyan : Color.cyan.opacity(0.7))
-                .frame(width: isHovered ? 4 : 2, height: 28)
-                .shadow(color: Color.cyan.opacity(isHovered ? 0.9 : 0.5), radius: isHovered ? 4 : 2)
+                .fill(isHovered ? Color.accentColor : Color.accentColor.opacity(colorScheme == .dark ? 0.7 : 0.55))
+                .frame(width: isHovered ? 3.5 : 2, height: isHovered ? 30 : 26)
+                .shadow(
+                    color: Color.accentColor.opacity(isHovered ? 0.6 : (colorScheme == .dark ? 0.3 : 0.15)),
+                    radius: isHovered ? 3 : 1
+                )
+                .animation(.easeInOut(duration: 0.15), value: isHovered)
         }
         .onHover { hovering in
             isHovered = hovering
@@ -1388,17 +1452,148 @@ private struct InteractiveColumnDivider: View {
     }
 }
 
+private struct DockIconButton: View {
+    let icon: String
+    let width: CGFloat
+    let help: String
+    let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(width: width, height: 26)
+                .background(
+                    colorScheme == .dark
+                        ? Color.white.opacity(0.06)
+                        : Color.primary.opacity(0.05),
+                    in: RoundedRectangle(cornerRadius: 4)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(
+                            colorScheme == .dark
+                                ? Color.white.opacity(0.08)
+                                : Color.black.opacity(0.06),
+                            lineWidth: 0.5
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+}
+
+private struct ModernColumnDockItem: View {
+    let column: WindowSwitcherModel.ColumnPlan.Column
+    let index: Int
+    let totalColumns: Int
+    let option: WindowSwitcherModel.Option?
+    let width: CGFloat
+    let isTargeted: Bool
+    @ObservedObject var model: WindowSwitcherModel
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var subtitleText: String {
+        let percent = Int(column.widthFraction * 100)
+        return "\(percent)% · \(column.points)pt"
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if index > 0 {
+                DockIconButton(icon: "chevron.left", width: 14, help: "Move pane left") {
+                    model.movePhysicalColumn(at: index, offset: -1)
+                }
+            }
+
+            if let option {
+                Image(nsImage: option.icon)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 18, height: 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(option.appName)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(subtitleText)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer(minLength: 2)
+
+            if index < totalColumns - 1 {
+                DockIconButton(icon: "chevron.right", width: 14, help: "Move pane right") {
+                    model.movePhysicalColumn(at: index, offset: 1)
+                }
+            }
+
+            DockIconButton(icon: "xmark", width: 16, help: "Detach from layout") {
+                model.detach(column.id)
+            }
+        }
+        .padding(.horizontal, 6)
+        .frame(width: width, height: 42)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(
+                    isTargeted
+                        ? Color.accentColor.opacity(colorScheme == .dark ? 0.25 : 0.15)
+                        : (colorScheme == .dark
+                            ? Color.white.opacity(0.07)
+                            : Color(nsColor: .controlBackgroundColor).opacity(0.85))
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(
+                    isTargeted
+                        ? Color.accentColor
+                        : (colorScheme == .dark
+                            ? Color.white.opacity(0.12)
+                            : Color.black.opacity(0.08)),
+                    lineWidth: isTargeted ? 1.5 : 0.5
+                )
+        )
+        .shadow(
+            color: colorScheme == .dark
+                ? Color.black.opacity(0.15)
+                : Color.black.opacity(0.04),
+            radius: 2,
+            y: 1
+        )
+    }
+}
+
 private struct ModernColumnDock: View {
     @ObservedObject var model: WindowSwitcherModel
+    @Environment(\.colorScheme) private var colorScheme
     @State private var targetedIndex: Int?
+
+    private func planBreakdownText(_ plan: WindowSwitcherModel.ColumnPlan) -> String {
+        plan.columns.map { "Col \($0.position): \(Int($0.widthFraction * 100))%" }.joined(separator: " · ")
+    }
+
+    private func handleDrop(items: [String], targetIndex: Int, plan: WindowSwitcherModel.ColumnPlan) -> Bool {
+        guard let draggedIDString = items.first,
+              let draggedID = UUID(uuidString: draggedIDString),
+              let sourceIdx = plan.columns.firstIndex(where: { $0.id == draggedID }) else { return false }
+        model.reorderPhysicalColumns(from: sourceIdx, to: targetIndex)
+        return true
+    }
 
     var body: some View {
         if let plan = model.layoutPlan, plan.columns.count >= 2 {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 8) {
                     Label("Live Column Preview", systemImage: "rectangle.split.3x1")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
 
                     if model.customRatios != nil {
                         Button {
@@ -1410,9 +1605,23 @@ private struct ModernColumnDock: View {
                                 Text("Reset Equal")
                                     .font(.system(size: 10, weight: .medium))
                             }
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.white.opacity(0.08), in: Capsule())
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2.5)
+                            .background(
+                                colorScheme == .dark
+                                    ? Color.white.opacity(0.08)
+                                    : Color.primary.opacity(0.06),
+                                in: Capsule()
+                            )
+                            .overlay(
+                                Capsule()
+                                    .stroke(
+                                        colorScheme == .dark
+                                            ? Color.white.opacity(0.12)
+                                            : Color.black.opacity(0.08),
+                                        lineWidth: 0.5
+                                    )
+                            )
                             .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
@@ -1421,9 +1630,23 @@ private struct ModernColumnDock: View {
 
                     Spacer()
 
-                    Text(plan.columns.map { "Col \($0.position): \(Int($0.widthFraction * 100))%" }.joined(separator: " | "))
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(Color.cyan)
+                    HStack(spacing: 5) {
+                        Image(systemName: "slider.horizontal.below.rectangle")
+                            .font(.system(size: 9))
+                        Text(planBreakdownText(plan))
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.16 : 0.08))
+                    )
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.accentColor.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 0.5)
+                    )
                 }
 
                 GeometryReader { geo in
@@ -1433,82 +1656,20 @@ private struct ModernColumnDock: View {
 
                     HStack(spacing: 0) {
                         ForEach(Array(plan.columns.enumerated()), id: \.element.id) { idx, col in
-                            let option = model.options.first { $0.id == col.id }
                             let colWidth = max(50, availableWidth * col.widthFraction)
 
-                            HStack(spacing: 4) {
-                                if idx > 0 {
-                                    Button {
-                                        model.movePhysicalColumn(at: idx, offset: -1)
-                                    } label: {
-                                        Image(systemName: "chevron.left")
-                                            .font(.system(size: 8, weight: .bold))
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: 14, height: 26)
-                                            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 4))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Move pane left")
-                                }
-
-                                if let option {
-                                    Image(nsImage: option.icon)
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(width: 18, height: 18)
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(option.appName)
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .lineLimit(1)
-                                        Text("\(Int(col.widthFraction * 100))% · \(col.points)pt")
-                                            .font(.system(size: 9, design: .monospaced))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-
-                                Spacer(minLength: 2)
-
-                                if idx < plan.columns.count - 1 {
-                                    Button {
-                                        model.movePhysicalColumn(at: idx, offset: 1)
-                                    } label: {
-                                        Image(systemName: "chevron.right")
-                                            .font(.system(size: 8, weight: .bold))
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: 14, height: 26)
-                                            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 4))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Move pane right")
-                                }
-
-                                Button {
-                                    model.detach(col.id)
-                                } label: {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 8, weight: .bold))
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 16, height: 26)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(.horizontal, 6)
-                            .frame(width: colWidth, height: 42)
-                            .background(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .fill(targetedIndex == idx ? Color.cyan.opacity(0.2) : Color.white.opacity(0.06))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .stroke(targetedIndex == idx ? Color.cyan : Color.white.opacity(0.12), lineWidth: 0.5)
+                            ModernColumnDockItem(
+                                column: col,
+                                index: idx,
+                                totalColumns: plan.columns.count,
+                                option: model.options.first { $0.id == col.id },
+                                width: colWidth,
+                                isTargeted: targetedIndex == idx,
+                                model: model
                             )
                             .draggable(col.id.uuidString)
                             .dropDestination(for: String.self) { items, _ in
-                                guard let draggedIDString = items.first,
-                                      let draggedID = UUID(uuidString: draggedIDString),
-                                      let sourceIdx = plan.columns.firstIndex(where: { $0.id == draggedID }) else { return false }
-                                model.reorderPhysicalColumns(from: sourceIdx, to: idx)
-                                return true
+                                handleDrop(items: items, targetIndex: idx, plan: plan)
                             } isTargeted: { targeted in
                                 if targeted {
                                     targetedIndex = idx
@@ -1529,11 +1690,20 @@ private struct ModernColumnDock: View {
             .padding(10)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.black.opacity(0.35))
+                    .fill(
+                        colorScheme == .dark
+                            ? Color.black.opacity(0.35)
+                            : Color(nsColor: .controlBackgroundColor).opacity(0.55)
+                    )
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    .stroke(
+                        colorScheme == .dark
+                            ? Color.white.opacity(0.1)
+                            : Color.black.opacity(0.08),
+                        lineWidth: 1
+                    )
             )
         }
     }
@@ -1672,6 +1842,7 @@ private struct ChooserSettingsMenu: View {
 
             Divider()
 
+            Button("Check for Updates…") { model.checkForUpdates?() }
             Button("Shortcuts & Settings…") { model.openSettings?() }
         } label: {
             Image(systemName: "gearshape")
@@ -2050,6 +2221,10 @@ final class WindowSwitcherController {
             self?.close()
             SettingsWindow.open(model: appModel)
         }
+        model.checkForUpdates = { [weak self] in
+            self?.close()
+            appModel.checkForUpdates(interactive: true)
+        }
     }
 
     deinit {
@@ -2225,6 +2400,7 @@ final class StatusBarController: NSObject {
     private let statusItem: NSStatusItem
     private let switcher: WindowSwitcherController
     private let appModel: AppModel
+    private var appearanceObservation: NSKeyValueObservation?
 
     init(model: AppModel) {
         appModel = model
@@ -2238,10 +2414,15 @@ final class StatusBarController: NSObject {
             self?.switcher.show()
         }
         if let button = statusItem.button {
-            button.image = MenuBarIcon.make()
+            button.image = MenuBarIcon.make(for: NSApp.effectiveAppearance)
             button.target = self
             button.action = #selector(statusItemClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] app, _ in
+            Task { @MainActor in
+                self?.statusItem.button?.image = MenuBarIcon.make(for: app.effectiveAppearance)
+            }
         }
     }
 
@@ -2290,6 +2471,7 @@ final class StatusBarController: NSObject {
             menu.addItem(withTitle: "Detach All Windows", action: #selector(detachAll), keyEquivalent: "")
         }
         menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Window Columns", action: #selector(quit), keyEquivalent: "q")
         for item in menu.items { item.target = self }
@@ -2309,6 +2491,9 @@ final class StatusBarController: NSObject {
     @objc private func undoArrangement() { appModel.coordinator.undoLastArrangement() }
     @objc private func showSettings() {
         SettingsWindow.open(model: appModel)
+    }
+    @objc private func checkForUpdates() {
+        appModel.checkForUpdates(interactive: true)
     }
     @objc private func quit() { NSApp.terminate(nil) }
 }
@@ -2350,10 +2535,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.statusBarController = StatusBarController(model: AppModel.shared)
             self.groupHostManager = GroupHostManager(coordinator: AppModel.shared.coordinator)
             self.dividerOverlayController = DividerOverlayController(coordinator: AppModel.shared.coordinator)
+
+            // Strip any remaining quarantine attributes from self and helper bundles
+            Task.detached(priority: .utility) {
+                QuarantineRemover.cleanSelfAndHelpers()
+            }
             // The chooser performs the first window scan; doing one here too
             // just doubled the work on every launch.
             if !Self.wasLaunchedAtLogin {
                 self.statusBarController?.showSwitcherPanel()
+            }
+
+            if AppModel.shared.store.preferences.automaticallyChecksForUpdates {
+                let shouldCheck: Bool = {
+                    guard let lastCheck = AppModel.shared.store.preferences.lastUpdateCheckDate else { return true }
+                    return Date().timeIntervalSince(lastCheck) > 86400
+                }()
+                if shouldCheck {
+                    AppModel.shared.checkForUpdates(interactive: false)
+                }
             }
         }
     }
