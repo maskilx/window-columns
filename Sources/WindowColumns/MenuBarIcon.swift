@@ -2,82 +2,68 @@ import AppKit
 import SwiftUI
 
 enum MenuBarIcon {
-    /// Produces the menu bar status item icon matching the application's Dock icon.
-    /// Adapts to Light and Dark mode appearances, scaling sharply for Retina displays.
+    /// Produces a clean monochrome vector status bar icon matching the application's 3-column "W" branding.
+    /// Configured as a native macOS template image (`isTemplate = true`), automatically adapting to Light,
+    /// Dark, and accent-highlighted menu bars with crisp Retina rendering.
     static func make(for appearance: NSAppearance? = nil) -> NSImage {
-        let isDark = (appearance ?? NSApp.effectiveAppearance).bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let resource = isDark ? "AppIcon-v3-Dark" : "AppIcon-v3-Light"
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            ctx.setFillColor(NSColor.black.cgColor)
 
-        let loadedImage: NSImage? = {
-            if let url = Bundle.main.url(forResource: resource, withExtension: "png"),
-               let img = NSImage(contentsOf: url) {
-                return img
-            }
-            if let url = Bundle.main.url(forResource: "AppIcon-v3", withExtension: "icns"),
-               let img = NSImage(contentsOf: url) {
-                return img
-            }
-            // Fallback for development if running directly from Xcode/SPM without bundle resources
-            let projectResourceURL = URL(fileURLWithPath: #file)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Resources")
-                .appendingPathComponent("\(resource).png")
-            if let img = NSImage(contentsOf: projectResourceURL) {
-                return img
-            }
-            return NSApp.applicationIconImage
-        }()
+            let scale = rect.width / 18.0
+            func s(_ val: CGFloat) -> CGFloat { val * scale }
+            let ox = rect.origin.x, oy = rect.origin.y
 
-        guard let source = loadedImage else {
-            return fallbackWireframe()
-        }
+            // Column 1 (left)
+            let p1 = CGMutablePath()
+            p1.move(to: CGPoint(x: ox + s(1.2), y: oy + s(5.2)))
+            p1.addLine(to: CGPoint(x: ox + s(1.2), y: oy + s(12.3)))
+            p1.addArc(tangent1End: CGPoint(x: ox + s(1.2), y: oy + s(13.5)), tangent2End: CGPoint(x: ox + s(3.0), y: oy + s(13.1)), radius: s(1.4))
+            p1.addLine(to: CGPoint(x: ox + s(4.0), y: oy + s(12.8)))
+            p1.addArc(tangent1End: CGPoint(x: ox + s(5.4), y: oy + s(12.5)), tangent2End: CGPoint(x: ox + s(5.4), y: oy + s(11.0)), radius: s(1.4))
+            p1.addLine(to: CGPoint(x: ox + s(5.4), y: oy + s(4.5)))
+            p1.addArc(tangent1End: CGPoint(x: ox + s(5.4), y: oy + s(3.3)), tangent2End: CGPoint(x: ox + s(3.8), y: oy + s(3.6)), radius: s(1.4))
+            p1.addLine(to: CGPoint(x: ox + s(2.4), y: oy + s(3.9)))
+            p1.addArc(tangent1End: CGPoint(x: ox + s(1.2), y: oy + s(4.2)), tangent2End: CGPoint(x: ox + s(1.2), y: oy + s(5.6)), radius: s(1.4))
+            p1.closeSubpath()
 
-        let targetSize = NSSize(width: 18, height: 18)
-        let image = NSImage(size: targetSize, flipped: false) { rect in
-            source.draw(
-                in: rect,
-                from: NSRect(origin: .zero, size: source.size),
-                operation: .sourceOver,
-                fraction: 1.0
-            )
-            return true
-        }
-        image.isTemplate = false
-        image.accessibilityDescription = "Window Columns"
-        return image
-    }
+            // Column 2 (middle - taller)
+            let p2 = CGMutablePath()
+            p2.move(to: CGPoint(x: ox + s(6.9), y: oy + s(4.0)))
+            p2.addLine(to: CGPoint(x: ox + s(6.9), y: oy + s(14.4)))
+            p2.addArc(tangent1End: CGPoint(x: ox + s(6.9), y: oy + s(15.6)), tangent2End: CGPoint(x: ox + s(8.8), y: oy + s(15.2)), radius: s(1.4))
+            p2.addLine(to: CGPoint(x: ox + s(9.7), y: oy + s(15.0)))
+            p2.addArc(tangent1End: CGPoint(x: ox + s(11.1), y: oy + s(14.7)), tangent2End: CGPoint(x: ox + s(11.1), y: oy + s(13.2)), radius: s(1.4))
+            p2.addLine(to: CGPoint(x: ox + s(11.1), y: oy + s(3.2)))
+            p2.addArc(tangent1End: CGPoint(x: ox + s(11.1), y: oy + s(2.0)), tangent2End: CGPoint(x: ox + s(9.5), y: oy + s(2.3)), radius: s(1.4))
+            p2.addLine(to: CGPoint(x: ox + s(8.1), y: oy + s(2.6)))
+            p2.addArc(tangent1End: CGPoint(x: ox + s(6.9), y: oy + s(2.8)), tangent2End: CGPoint(x: ox + s(6.9), y: oy + s(4.2)), radius: s(1.4))
+            p2.closeSubpath()
 
-    /// Wireframe fallback in case image assets cannot be located.
-    private static func fallbackWireframe() -> NSImage {
-        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            let color = NSColor.labelColor
-            let frame = CGRect(x: 0.6, y: 3.0, width: 16.8, height: 12.0)
-            let stroke: CGFloat = 1.6
-            let outline = NSBezierPath(
-                roundedRect: frame.insetBy(dx: stroke / 2, dy: stroke / 2),
-                xRadius: 2.4,
-                yRadius: 2.4
-            )
-            color.setStroke()
-            outline.lineWidth = stroke
-            outline.stroke()
+            // Column 3 (right)
+            let p3 = CGMutablePath()
+            p3.move(to: CGPoint(x: ox + s(12.6), y: oy + s(4.8)))
+            p3.addLine(to: CGPoint(x: ox + s(12.6), y: oy + s(12.8)))
+            p3.addArc(tangent1End: CGPoint(x: ox + s(12.6), y: oy + s(14.0)), tangent2End: CGPoint(x: ox + s(14.4), y: oy + s(13.6)), radius: s(1.4))
+            p3.addLine(to: CGPoint(x: ox + s(15.4), y: oy + s(13.4)))
+            p3.addArc(tangent1End: CGPoint(x: ox + s(16.8), y: oy + s(13.1)), tangent2End: CGPoint(x: ox + s(16.8), y: oy + s(11.6)), radius: s(1.4))
+            p3.addLine(to: CGPoint(x: ox + s(16.8), y: oy + s(4.0)))
+            p3.addArc(tangent1End: CGPoint(x: ox + s(16.8), y: oy + s(2.8)), tangent2End: CGPoint(x: ox + s(15.2), y: oy + s(3.1)), radius: s(1.4))
+            p3.addLine(to: CGPoint(x: ox + s(13.8), y: oy + s(3.4)))
+            p3.addArc(tangent1End: CGPoint(x: ox + s(12.6), y: oy + s(3.6)), tangent2End: CGPoint(x: ox + s(12.6), y: oy + s(5.0)), radius: s(1.4))
+            p3.closeSubpath()
 
-            let dividers = NSBezierPath()
-            dividers.lineWidth = stroke
-            for fraction in [1.0 / 3.0, 2.0 / 3.0] {
-                let x = frame.minX + frame.width * fraction
-                dividers.move(to: CGPoint(x: x, y: frame.minY + stroke / 2))
-                dividers.line(to: CGPoint(x: x, y: frame.maxY - stroke / 2))
-            }
-            dividers.stroke()
+            ctx.addPath(p1)
+            ctx.addPath(p2)
+            ctx.addPath(p3)
+            ctx.fillPath()
             return true
         }
         image.isTemplate = true
         image.accessibilityDescription = "Window Columns"
         return image
     }
+
 
     /// The dot that identifies a group in the status-bar menu, tinted to match
     /// that group's Command-Tab companion icon.
