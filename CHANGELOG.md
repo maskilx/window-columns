@@ -28,6 +28,15 @@ While the project is in beta, compatibility may change between minor releases.
   - Added `make unquarantine` target to `Makefile`.
   - Updated first-launch guidance in `README.md` for macOS Sequoia (15+).
 
+### Changed
+
+- Light Mode UI/UX polish across switcher components:
+  - Redesigned Live Column Preview dock with appearance-adaptive translucent tray and high-contrast styling.
+  - Replaced raw neon cyan text with a crisp macOS accent status pill (`Col 1: 50% · Col 2: 50%`).
+  - Switched column cards to elevated `controlBackgroundColor` with subtle hairline strokes and shadows.
+  - Upgraded interactive column divider handle with native macOS accent blue and animated hover feedback.
+  - Modernized window cards, group shelves, and action buttons for seamless light and dark mode consistency.
+
 ## [0.1.0-beta.2] - 2026-09-04
 
 ### Added
