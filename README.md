@@ -95,12 +95,17 @@ path.
 
 ### Homebrew cask (recommended)
 
-The repository includes an arm64 cask in [`Casks/window-columns.rb`](Casks/window-columns.rb)
-configured to automatically strip quarantine attributes:
+Install directly via the official tap:
 
 ```sh
-brew tap maskilx/window-columns https://github.com/maskilx/window-columns
-brew install --cask maskilx/window-columns/window-columns
+brew install maskilx/tap/window-columns
+```
+
+Or tap the repository first:
+
+```sh
+brew tap maskilx/tap
+brew install --cask window-columns
 ```
 
 Homebrew installs **Window Columns.app** into `/Applications` and clears Gatekeeper

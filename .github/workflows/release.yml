@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Verify release metadata and checks
+        run: make verify
+
+      - name: Build release app
+        run: INSTALL=0 sh Scripts/build-app.sh
+        env:
+          CONFIGURATION: release
+
+      - name: Package release assets
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          ZIP_NAME="Window-Columns-${VERSION}-macos-arm64.zip"
+          ditto -c -k --keepParent "/private/tmp/Window Columns.app" "$ZIP_NAME"
+          shasum -a 256 "$ZIP_NAME" > "${ZIP_NAME}.sha256"
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          NOTES_FILE="docs/releases/${VERSION}.md"
+
+          PRERELEASE_FLAG=""
+          if [[ "$VERSION" == *"beta"* ]] || [[ "$VERSION" == *"alpha"* ]] || [[ "$VERSION" == *"rc"* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          if [ -f "$NOTES_FILE" ]; then
+            gh release create "$VERSION" \
+              --title "Window Columns ${VERSION#v}" \
+              --notes-file "$NOTES_FILE" \
+              $PRERELEASE_FLAG \
+              "$ZIP_NAME" \
+              "${ZIP_NAME}.sha256" || \
+            gh release upload "$VERSION" "$ZIP_NAME" "${ZIP_NAME}.sha256" --clobber
+          else
+            gh release create "$VERSION" \
+              --title "Window Columns ${VERSION#v}" \
+              --generate-notes \
+              $PRERELEASE_FLAG \
+              "$ZIP_NAME" \
+              "${ZIP_NAME}.sha256" || \
+            gh release upload "$VERSION" "$ZIP_NAME" "${ZIP_NAME}.sha256" --clobber
+          fi
