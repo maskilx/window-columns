@@ -12,7 +12,7 @@ body:
     attributes:
       label: Window Columns version
       description: Release tag or commit hash. The current beta version is in the VERSION file.
-      placeholder: 0.1.0-beta.1
+      placeholder: 0.1.0-beta.3
     validations:
       required: true
   - type: input
