@@ -19,11 +19,11 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleGetInfoString</key>
-    <string>Window Columns 0.1.0 Beta 3</string>
+    <string>Window Columns 0.1.0 Beta 4</string>
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
-    <string>30</string>
+    <string>31</string>
     <key>LSMultipleInstancesProhibited</key>
     <true/>
     <key>LSUIElement</key>

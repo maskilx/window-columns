@@ -8,6 +8,32 @@ While the project is in beta, compatibility may change between minor releases.
 
 ## [Unreleased]
 
+## [0.1.0-beta.4] - 2026-09-05
+
+### Added
+
+- Settings → General → Layout now offers screen-edge padding (0–64 pt), independently of column gaps, with persisted preferences and matching chooser previews.
+
+### Fixed
+
+- Minimize only the focused group when using the shortcut, preserve focus when minimizing a background group, and allow an ungrouped window from the same app to remain in front. Cancel delayed activation when focus moves to another window in the same app.
+
+- Removed unconditional repeated raise/focus passes on Command-Tab, avoided reflowing an already arranged group, and ignored the resulting AX feedback to prevent activation shaking.
+
+- Restore all sibling windows when activating a group containing multiple windows of the same app; select groups by the focused window and preserve its focus.
+- Stop swallowing the first Command-Tab after creating a group, and allow Command-Tab to restore minimized groups after the brief macOS minimize cascade.
+- Assign distinct WindowServer numbers to overlapping, identically titled windows and retain known identities when their titles or frames change.
+- Cancel queued divider writes when the selection changes and serialize frame updates so obsolete resize work cannot overwrite a newer layout.
+- Cancel delayed group raises when switching to another application, and prevent automatic activation from choosing another group during a restore.
+- Preserve saved membership when an Accessibility scan temporarily misses a window; normalize duplicate group IDs and enforce the nine-group limit when loading saved groups.
+- Serialize companion launches, reject stale launch completions, preserve crash retry backoff, and prevent relaunch during shutdown.
+- Correct codesigning argument quoting for repository paths containing spaces.
+
+### Tests
+
+- Added coordinator activation regressions using simulated Codex windows, plus companion activation and launch-state checks.
+- Isolated companion integration checks from user helpers and added actual window stacking and per-display geometry checks to the runtime suite.
+
 ## [0.1.0-beta.3] - 2026-09-04
 
 ### Added
@@ -72,7 +98,8 @@ While the project is in beta, compatibility may change between minor releases.
 
 - Kept unrelated groups interactive when one or more other groups are minimized.
 
-[Unreleased]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.3...HEAD
+[Unreleased]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.4...HEAD
+[0.1.0-beta.4]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.3...v0.1.0-beta.4
 [0.1.0-beta.3]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.2...v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.1...v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/maskilx/window-columns/releases/tag/v0.1.0-beta.1

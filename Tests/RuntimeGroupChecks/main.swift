@@ -62,6 +62,7 @@ func onScreenWindows() -> [OnScreenWindow] {
 
 struct SavedGroup {
     let slot: Int
+    let displayID: String
     let name: String
     let customName: String?
     let colorIndex: Int
@@ -79,6 +80,7 @@ func savedGroups() -> [SavedGroup] {
               let windows = item["windows"] as? [[String: Any]] else { return nil }
         return SavedGroup(
             slot: slot,
+            displayID: item["displayID"] as? String ?? "",
             name: item["name"] as? String ?? "?",
             customName: item["customName"] as? String,
             colorIndex: item["colorIndex"] as? Int ?? -1,
@@ -93,14 +95,19 @@ func savedGroups() -> [SavedGroup] {
 
 /// The usable area in the window server's top-left coordinate space.
 func visibleFrameTopLeft(for screen: NSScreen) -> CGRect {
-    let full = screen.frame
+    let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
     let visible = screen.visibleFrame
+    let defaults = UserDefaults(suiteName: controllerBundleID)
+    let data = defaults?.data(forKey: "WindowColumns.savedState.v1")
+    let payload = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    let preferences = payload?["preferences"] as? [String: Any]
+    let padding = CGFloat(min(max(preferences?["windowPadding"] as? Double ?? 0, 0), 64))
     return CGRect(
         x: visible.minX,
-        y: full.height - visible.maxY,
+        y: primaryTop - visible.maxY,
         width: visible.width,
         height: visible.height
-    )
+    ).insetBy(dx: padding, dy: padding)
 }
 
 func activate(bundleID: String) {
@@ -139,12 +146,17 @@ for slot in 0..<9 where !groups.contains(where: { $0.slot == slot }) {
 
 // MARK: - Activation brings the real windows forward
 
-print("\n[2] Command-Tab style activation")
-guard let screen = NSScreen.main else { exit(1) }
-let usable = visibleFrameTopLeft(for: screen)
+print("\n[2] Companion activation (LaunchServices/Dock route)")
 
 for group in groups {
     let label = "group \(group.slot + 1)"
+    let screen = NSScreen.screens.first { screen in
+        guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
+              let uuid = CGDisplayCreateUUIDFromDisplayID(number.uint32Value) else { return false }
+        return CFUUIDCreateString(nil, uuid.takeRetainedValue()) as String == group.displayID
+    } ?? NSScreen.main
+    guard let screen else { continue }
+    let usable = visibleFrameTopLeft(for: screen)
     guard group.windowNumbers.count >= 2 else {
         check("\(label) has at least two saved windows", false)
         continue
@@ -163,7 +175,8 @@ for group in groups {
         }
     }
 
-    // This is what Command-Tab does: select the companion.
+    // LaunchServices exercises activation plus Dock reopen. The keyboard-only
+    // path also needs manual Command-Tab verification on a desktop session.
     let companionBundleID = "\(controllerBundleID).Group\(group.slot + 1)"
     activate(bundleID: companionBundleID)
 
@@ -173,6 +186,11 @@ for group in groups {
         return expected.isSubset(of: visible)
     }
     check("\(label): every member window is on screen after activation", allVisible)
+    let allInFront = wait(timeout: 3) {
+        Set(onScreenWindows().prefix(expected.count).map(\.number)) == expected
+    }
+    check("\(label): group members are the frontmost normal windows", allInFront,
+          "A window can be on screen but still covered by another application")
 
     // The companion must hand over rather than sit in front with no windows.
     let companionPID = NSRunningApplication
@@ -193,8 +211,20 @@ for group in groups {
               "expected \(mainBundleID), got \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?")")
     }
 
-    // MARK: Geometry — a connected set of full-height columns.
-    RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+    // A successful handoff must stay stable, rather than repeatedly raising
+    // siblings or reapplying slightly different frames after activation.
+    let settled = onScreenWindows().filter { expected.contains($0.number) }
+    var stable = true
+    for _ in 0..<20 {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.025))
+        let sample = onScreenWindows().filter { expected.contains($0.number) }
+        if sample.map(\.number) != settled.map(\.number) || sample.map(\.bounds) != settled.map(\.bounds) {
+            stable = false
+        }
+    }
+    check("\(label): stacking and frames stay stable after activation", stable)
+
+    // MARK: Geometry — columns inside the configured screen padding.
     let windows = onScreenWindows()
     let members = group.windowNumbers.compactMap { number in
         windows.first { $0.number == number }

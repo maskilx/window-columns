@@ -11,7 +11,9 @@ property lists contain the numeric base version, while `CFBundleGetInfoString`,
 
 ## Release checklist
 
-1. Update `VERSION`, both property lists, and `CHANGELOG.md`.
+1. Update `VERSION`, `AppVersion.swift`, both property lists, version checks,
+   `README.md` download links, and `CHANGELOG.md`. Add release notes under
+   `docs/releases/v<version>.md`.
 2. Increase `CFBundleVersion` in both property lists.
 3. Run `make verify`.
 4. For activation, layout, or companion changes, install the app and run
@@ -25,8 +27,11 @@ property lists contain the numeric base version, while `CFBundleGetInfoString`,
    git push origin main "v$version"
    ```
 
-7. Create a GitHub prerelease from the tag. Use the matching changelog section
-   as release notes and keep **Set as a pre-release** enabled.
+7. The tag triggers the Release workflow, which verifies, builds, and publishes
+   the GitHub prerelease with the matching release notes, ZIP, and SHA-256 file.
+   Wait for the workflow to succeed and verify the published assets.
+8. Update `Casks/window-columns.rb` with the published version and ZIP checksum,
+   then commit and push the cask update. Never guess a checksum before packaging.
 
 ## Binary distribution during beta
 

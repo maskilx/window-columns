@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/maskilx/window-columns/releases/download/v0.1.0-beta.3/Window-Columns-v0.1.0-beta.3-macos-arm64.zip">
+  <a href="https://github.com/maskilx/window-columns/releases/download/v0.1.0-beta.4/Window-Columns-v0.1.0-beta.4-macos-arm64.zip">
     <img src="https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-007AFF?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="Download Window Columns for macOS (Apple Silicon)">
   </a>
 </p>
@@ -25,7 +25,7 @@ entry so you can switch to a whole set of windows at once.
 It uses the Accessibility API directly — no scripting bridge, no third-party
 window manager, no background polling.
 
-> **Public beta:** the current source release is **0.1.0-beta.3**. It is built
+> **Public beta:** the current source release is **0.1.0-beta.4**. It is built
 > and used on macOS 26 on Apple silicon, but has not yet been tested across the
 > full macOS 13+ support range. Expect rough edges and please report them.
 
@@ -68,8 +68,8 @@ at a time.
 ### Prebuilt beta
 
 On an Apple silicon Mac, download
-`Window-Columns-v0.1.0-beta.3-macos-arm64.zip` from the
-[v0.1.0-beta.3 prerelease](https://github.com/maskilx/window-columns/releases/tag/v0.1.0-beta.3),
+`Window-Columns-v0.1.0-beta.4-macos-arm64.zip` from the
+[v0.1.0-beta.4 prerelease](https://github.com/maskilx/window-columns/releases/tag/v0.1.0-beta.4),
 extract it, and move **Window Columns.app** to `/Applications`.
 
 The prebuilt beta is arm64-only. Intel Mac users should build from source.
@@ -197,7 +197,7 @@ Three pieces:
 - **The layout engine** (`Sources/WindowColumnsCore`) is pure logic with no
   AppKit dependency: column geometry, minimum-width handling, matching saved
   windows to live ones, and classifying how a window has drifted from its slot.
-  This is the part with unit tests.
+  Core checks cover these rules; app tests also exercise the coordinator through an injected Accessibility service.
 - **The companions** (`Sources/WindowColumnsGroupHost`) are tiny apps, one per
   group, that exist only to appear in the Dock and Command-Tab. Selecting one
   asks the controller to restore that group, then it steps aside.
@@ -215,23 +215,31 @@ API, which is not subject to that restriction.
 with a custom title bar emit those unreliably or not at all during a drag. The
 real window frames are read once per pointer release instead.
 
+Grouped windows can have outer padding set in **Settings → General → Layout →
+Padding from screen edges** (0–64 pt). The default is 0; column gaps are controlled
+separately. The current group updates while adjusting the setting, and other
+groups use it on their next activation.
+
 ## Development
 
 ```sh
 make build        # compile
-make test         # core checks: layout, matching, displacement, fit, group state
-make verify       # metadata validation, build, and core checks
+make test         # core checks and coordinator regression tests
+make verify       # metadata validation, build, core and app regression tests
 make app          # build a staged .app under /private/tmp
 make install      # build and install to /Applications
 make run          # install and launch
-make test-helper  # launch a real companion and check the Command-Tab handshake
+make test-helper  # isolated companion launch, activation handshake, and cleanup
 make test-runtime # end-to-end checks against the installed, running app
 ```
 
-`make test-runtime` drives the app you actually installed: it activates each
-group the way Command-Tab does and verifies every member comes forward, that the
-companion yields the foreground, and that the columns are full height, span the
-usable area, and are separated by the configured gap.
+`make test-runtime` drives the app you actually installed and requires at least
+one saved group. It activates each companion through LaunchServices (the Dock
+route), checks actual window stacking and foreground ownership, and verifies
+column geometry on the group's display. Native Command-Tab does not deliver the
+Dock reopen event, so also test it manually with two same-app windows, including
+a minimized group. `make test-helper` uses a temporary companion with its own
+bundle identifier and never stops the user's group helpers.
 
 `make reset-permission` clears stale Accessibility grants, including entries left
 by earlier ad-hoc builds that still show as enabled but no longer match.

@@ -269,6 +269,19 @@ struct SettingsView: View {
                             .monospacedDigit().frame(width: 46, alignment: .trailing)
                     }
                 }
+                LabeledContent("Padding from screen edges") {
+                    HStack {
+                        Slider(
+                            value: Binding(get: { coordinator.windowPadding }, set: { model.updateWindowPadding($0) }),
+                            in: 0...64, step: 1
+                        )
+                        Text("\(Int(coordinator.windowPadding)) pt")
+                            .monospacedDigit().frame(width: 46, alignment: .trailing)
+                    }
+                }
+                Text("Padding leaves space around the outside of every group. Changes apply to the current group immediately and to other groups when activated.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             if !coordinator.isTrusted {

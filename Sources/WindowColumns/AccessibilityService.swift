@@ -4,8 +4,8 @@ import Foundation
 
 // AX frame operations are safe to issue from the dedicated serial resize queue.
 // Observer registration and discovery remain confined to the main actor.
-final class AccessibilityService: @unchecked Sendable {
-    private struct WindowDescriptor {
+class AccessibilityService: @unchecked Sendable {
+    struct WindowDescriptor {
         let id: CGWindowID
         let pid: pid_t
         let title: String
@@ -23,8 +23,17 @@ final class AccessibilityService: @unchecked Sendable {
     }
 
     private var observers: [pid_t: ObserverRecord] = [:]
+    private let frameWriteLock = NSRecursiveLock()
 
     var isTrusted: Bool { AXIsProcessTrusted() }
+    var frontmostPID: pid_t? { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+
+    func makeFrontmost(pid: pid_t, donorPID: pid_t?) {
+        WindowActivator.makeFrontmost(pid: pid, donorPID: donorPID)
+    }
+
+    func raise(_ element: AXUIElement) { WindowActivator.raise(element) }
+    func focus(_ element: AXUIElement) { WindowActivator.focus(element) }
     var canCaptureScreen: Bool { CGPreflightScreenCaptureAccess() }
 
     @discardableResult
@@ -49,6 +58,7 @@ final class AccessibilityService: @unchecked Sendable {
         var result: [ManagedWindow] = []
         var unsupported: [String] = []
         var reusedIDs: Set<UUID> = []
+        var claimedWindowIDs: Set<CGWindowID> = []
         var seenElements: [AXUIElement] = []
         let windowDescriptors = currentWindowDescriptors()
 
@@ -74,29 +84,24 @@ final class AccessibilityService: @unchecked Sendable {
                 }
 
                 let bundleID = app.bundleIdentifier ?? "pid.\(app.processIdentifier)"
+                // AX identity survives retitling and resizing. Title/proximity
+                // fallback here transferred selection to unrelated replacement
+                // windows, especially several identically titled Electron windows.
                 let old = previous.first { !reusedIDs.contains($0.id) && CFEqual($0.element, element) }
-                    ?? previous
-                        .filter { !reusedIDs.contains($0.id) && $0.pid == app.processIdentifier && $0.title == title }
-                        .min { lhs, rhs in
-                            hypot(lhs.frame.midX - frame.midX, lhs.frame.midY - frame.midY)
-                                < hypot(rhs.frame.midX - frame.midX, rhs.frame.midY - frame.midY)
-                        }
                 if let old { reusedIDs.insert(old.id) }
-                // A minimized window reports odd bounds, and the WindowServer
-                // number is matched by frame proximity — re-deriving it here
-                // could hand the group a different window. Keep what we already
-                // knew for as long as it stays minimized.
                 let resolvedWindowID: CGWindowID?
-                if minimized, let previous = old?.windowID {
-                    resolvedWindowID = previous
+                if let previousNumber = old?.windowID, !claimedWindowIDs.contains(previousNumber) {
+                    resolvedWindowID = previousNumber
                 } else {
                     resolvedWindowID = matchingWindowID(
                         pid: app.processIdentifier,
                         title: title,
                         frame: frame,
-                        descriptors: windowDescriptors
+                        descriptors: windowDescriptors,
+                        excluding: claimedWindowIDs.union(previous.compactMap(\.windowID))
                     )
                 }
+                if let resolvedWindowID { claimedWindowIDs.insert(resolvedWindowID) }
                 result.append(ManagedWindow(
                     id: old?.id ?? UUID(),
                     element: element,
@@ -157,6 +162,8 @@ final class AccessibilityService: @unchecked Sendable {
     }
 
     func setFrame(_ cocoaFrame: CGRect, of element: AXUIElement) throws -> CGRect {
+        frameWriteLock.lock()
+        defer { frameWriteLock.unlock() }
         let current = frame(of: element)
         let axFrame = CoordinateConverter.cocoaToAccessibility(cocoaFrame)
         var position = axFrame.origin
@@ -182,9 +189,16 @@ final class AccessibilityService: @unchecked Sendable {
             sizeResult = AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, sizeValue)
         }
         guard positionResult == .success, sizeResult == .success else {
-            throw LayoutError.accessibility("A window refused to move or resize (Accessibility error \(sizeResult.rawValue)).")
+            throw LayoutError.accessibility("A window refused to move or resize (Accessibility error \((positionResult != .success ? positionResult : sizeResult).rawValue)).")
         }
         return frame(of: element) ?? cocoaFrame
+    }
+
+    func setFrame(_ frame: CGRect, of element: AXUIElement, session: WindowFrameWriteSession) throws -> CGRect? {
+        frameWriteLock.lock()
+        defer { frameWriteLock.unlock() }
+        guard !session.isCancelled else { return nil }
+        return try setFrame(frame, of: element)
     }
 
     /// Whether Accessibility calls actually succeed right now.
@@ -217,6 +231,8 @@ final class AccessibilityService: @unchecked Sendable {
     }
 
     func minimize(_ element: AXUIElement) {
+        frameWriteLock.lock()
+        defer { frameWriteLock.unlock() }
         guard isSettable(kAXMinimizedAttribute as CFString, on: element) else { return }
         AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
     }
@@ -229,6 +245,8 @@ final class AccessibilityService: @unchecked Sendable {
     /// Restores a minimized window. A minimized window cannot be raised or
     /// resized, so this has to happen before any layout pass.
     func unminimize(_ element: AXUIElement) {
+        frameWriteLock.lock()
+        defer { frameWriteLock.unlock() }
         guard isSettable(kAXMinimizedAttribute as CFString, on: element) else { return }
         AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
     }
@@ -277,6 +295,11 @@ final class AccessibilityService: @unchecked Sendable {
 
     func currentFrame(of element: AXUIElement) -> CGRect? {
         frame(of: element)
+    }
+
+    func focusedWindow() -> AXUIElement? {
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
+        return copyAttribute(kAXFocusedWindowAttribute as CFString, from: AXUIElementCreateApplication(pid))
     }
 
     func focusedWindowBelongs(to windows: [ManagedWindow]) -> Bool {
@@ -379,13 +402,14 @@ final class AccessibilityService: @unchecked Sendable {
         }
     }
 
-    private func matchingWindowID(
+    func matchingWindowID(
         pid: pid_t,
         title: String,
         frame: CGRect,
-        descriptors: [WindowDescriptor]
+        descriptors: [WindowDescriptor],
+        excluding claimedIDs: Set<CGWindowID>
     ) -> CGWindowID? {
-        let candidates = descriptors.filter { $0.pid == pid }
+        let candidates = descriptors.filter { $0.pid == pid && !claimedIDs.contains($0.id) }
         let titled = candidates.filter { !$0.title.isEmpty && $0.title == title }
         let pool = titled.isEmpty ? candidates : titled
         return pool.min { lhs, rhs in

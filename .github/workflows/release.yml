@@ -24,12 +24,21 @@ jobs:
         run: swift --version
 
       - name: Verify release metadata and checks
-        run: make verify
+        run: |
+          test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
+          make verify
 
       - name: Build release app
         run: INSTALL=0 sh Scripts/build-app.sh
         env:
           CONFIGURATION: release
+
+      - name: Verify distributable
+        run: |
+          APP="/private/tmp/Window Columns.app"
+          codesign --verify --deep --strict "$APP"
+          test "$(lipo -archs "$APP/Contents/MacOS/WindowColumns")" = "arm64"
+          test "$(plutil -extract CFBundleVersion raw -o - "$APP/Contents/Info.plist")" = "$(plutil -extract CFBundleVersion raw -o - Resources/Info.plist)"
 
       - name: Package release assets
         run: |

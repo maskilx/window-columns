@@ -26,7 +26,7 @@ See the README for why the signing identity matters.
 ## Before opening a pull request
 
 ```sh
-make verify        # metadata, build, and core checks
+make verify        # metadata, build, core and app regression tests
 make test-runtime  # end-to-end, against the installed and running app
 ```
 
@@ -58,8 +58,14 @@ re-introduce bugs around:
   inconsistently, so nothing may depend on them alone. Window frames are read
   directly on pointer release.
 
-Anything that writes a window frame clears `AXMinimized`, which is why a
-deliberately minimized group has to suppress the reconciliation paths.
+Deliberately minimized groups suppress reconciliation; explicit restoration
+unminimizes their members before arranging them. Frame writes share a lock, and
+queued divider writes carry a cancellation session so switching groups cannot
+apply stale resize work or persist obsolete results.
+
+The runtime suite uses the Dock/LaunchServices route. Also verify native
+Command-Tab manually: it sends activation without the Dock reopen callback.
+Include same-app windows, minimized groups, and switching away during a restore.
 
 ## Style
 

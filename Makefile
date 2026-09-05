@@ -5,17 +5,19 @@ build:
 
 test:
 	swift run LayoutEngineChecks
+	sh Scripts/test-app.sh
 
 verify:
 	sh Scripts/verify-release-metadata.sh
 	swift build
 	swift run LayoutEngineChecks
+	sh Scripts/test-app.sh
 
 # Launches a real group companion and verifies the Command-Tab handshake.
 # Needs `make app` first.
 test-helper: app
 	swift build --product GroupHostIntegrationChecks
-	swift run GroupHostIntegrationChecks "/private/tmp/Window Columns.app/Contents/Helpers/Window Group 9.app"
+	sh Scripts/test-helper.sh "/private/tmp/Window Columns.app/Contents/Helpers/Window Group 9.app"
 
 # End-to-end checks against the installed, running app and the real window
 # server: activation, column geometry, companion lifecycle, group identity.

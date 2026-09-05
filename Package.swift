@@ -23,6 +23,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "WindowColumnsGroupHost",
+            dependencies: ["WindowColumnsCore"],
             path: "Sources/WindowColumnsGroupHost"
         ),
         .executableTarget(
@@ -33,6 +34,11 @@ let package = Package(
         .executableTarget(
             name: "GroupHostIntegrationChecks",
             path: "Tests/GroupHostIntegrationChecks"
+        ),
+        .testTarget(
+            name: "WindowColumnsAppTests",
+            dependencies: ["WindowColumns"],
+            path: "Tests/WindowColumnsAppTests"
         ),
         .executableTarget(
             name: "RuntimeGroupChecks",

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import WindowColumnsCore
 
 private let controllerBundleID = "com.adimaskil.WindowColumns"
 private let activationRequest = Notification.Name("com.adimaskil.WindowColumns.activateGroup")
@@ -21,10 +22,8 @@ private let groupMinimized = Notification.Name("com.adimaskil.WindowColumns.grou
 final class GroupHostDelegate: NSObject, NSApplicationDelegate {
     private let groupID: String
     private var groupName: String
-    private var suppressActivationsUntil: Date
-    private var isGroupMinimized = false
+    private var activationState = CompanionActivationState()
     private var handoffTimeout: DispatchWorkItem?
-    private var lastRequest = Date.distantPast
     /// Set when this helper is shutting down because the controller went away,
     /// which is not the user dismantling the group.
     private var isFollowingControllerOut = false
@@ -41,17 +40,8 @@ final class GroupHostDelegate: NSObject, NSApplicationDelegate {
         }
         groupID = value(after: "--group-id") ?? ""
         groupName = value(after: "--group-name") ?? "Window Group"
-        // The controller activates a brand-new companion once so it takes its
-        // place in the Command-Tab order. That synthetic activation must not
-        // re-raise the group. A deadline is used rather than a "skip the next
-        // one" flag: if the synthetic activation is refused the flag would never
-        // clear and the first real Command-Tab would be swallowed.
-        // A short guard also covers the controller's own start-up, when up to
-        // nine companions are launched at once and none of them should pull the
-        // user's focus.
-        suppressActivationsUntil = Date().addingTimeInterval(
-            value(after: "--ignore-first-activation") == "true" ? 3 : 1
-        )
+        // Companions launch in the background. Every later activation belongs
+        // to the user; a startup deadline used to swallow their first Command-Tab.
         super.init()
     }
 
@@ -97,7 +87,6 @@ final class GroupHostDelegate: NSObject, NSApplicationDelegate {
             ) { [weak self] notification in
                 guard notification.object as? String == self?.groupID else { return }
                 Task { @MainActor in
-                    if handled { self?.isGroupMinimized = false }
                     self?.handoffCompleted(restored: handled)
                 }
             })
@@ -109,8 +98,9 @@ final class GroupHostDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] notification in
             guard let self, notification.object as? String == self.groupID else { return }
             Task { @MainActor in
-                self.isGroupMinimized = true
-                self.suppressActivationsUntil = Date().addingTimeInterval(3.0)
+                // Only suppress the immediate focus cascade caused by minimizing.
+                // Keeping a minimized flag here permanently swallowed Command-Tab.
+                self.activationState.didMinimize(at: Date())
             }
         })
     }
@@ -134,10 +124,8 @@ final class GroupHostDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        if isGroupMinimized || Date() < suppressActivationsUntil {
-            // macOS automatically activated this companion or the user Command-Tabbed past it
-            // while the group is minimized. Do not restore the group!
-            // Activate Finder so macOS moves focus away from this companion.
+        if activationState.suppressesActivation(at: Date()) {
+            // Step aside during the immediate minimize cascade.
             if let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first {
                 finder.activate(options: [.activateIgnoringOtherApps])
             }
@@ -152,9 +140,7 @@ final class GroupHostDelegate: NSObject, NSApplicationDelegate {
         hasVisibleWindows flag: Bool
     ) -> Bool {
         // Clicking the Dock tile explicitly requests un-minimizing / restoring the group!
-        isGroupMinimized = false
-        suppressActivationsUntil = Date.distantPast
-        requestGroupActivation()
+        requestGroupActivation(explicit: true)
         return true
     }
 
@@ -216,9 +202,7 @@ final class GroupHostDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showGroup() {
-        isGroupMinimized = false
-        suppressActivationsUntil = Date.distantPast
-        requestGroupActivation()
+        requestGroupActivation(explicit: true)
     }
 
     @objc private func minimizeGroup() {
@@ -231,15 +215,13 @@ final class GroupHostDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func requestGroupActivation() {
+    private func requestGroupActivation(explicit: Bool = false) {
         guard !groupID.isEmpty else { return }
         // One user action delivers both an activation and a reopen event, so
         // this is reached twice. Uncoalesced, the controller runs the whole
         // restore — rescan, layout write, raise passes — twice per Command-Tab,
         // writing every window's frame twice over.
-        let now = Date()
-        guard now.timeIntervalSince(lastRequest) > 0.4 else { return }
-        lastRequest = now
+        guard activationState.beginRequest(at: Date(), explicit: explicit) else { return }
 
         // Hand our activation right to the controller so its cross-application
         // activation is honoured under macOS 14+ cooperative activation.

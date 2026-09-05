@@ -24,6 +24,13 @@ public struct ColumnFit: Equatable, Sendable {
 }
 
 public struct ColumnLayoutEngine {
+    /// Uniform outer padding, separate from the gaps between columns.
+    public static func contentFrame(in frame: CGRect, padding: CGFloat) -> CGRect {
+        let requested = padding.isFinite ? max(0, padding) : 0
+        let inset = min(requested, max(0, (min(frame.width, frame.height) - 1) / 2))
+        return frame.insetBy(dx: inset, dy: inset)
+    }
+
     /// The width these windows need against the width the display offers.
     public static func fit(
         in visibleWidth: CGFloat,

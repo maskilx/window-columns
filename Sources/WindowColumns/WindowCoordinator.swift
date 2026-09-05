@@ -41,6 +41,8 @@ final class WindowCoordinator: ObservableObject {
     @Published var displays: [DisplayDescriptor] = DisplayDescriptor.current()
     @Published var selectedDisplayID: String = ""
     @Published var gap: Double = 8
+    @Published var windowPadding: Double = 0
+    private var paddingUpdateWorkItem: DispatchWorkItem?
     @Published var lastError: LayoutError?
     @Published var isApplyingLayout = false
     @Published private(set) var accessibilityGranted = false
@@ -48,6 +50,8 @@ final class WindowCoordinator: ObservableObject {
     @Published private(set) var groups: [WindowGroupSnapshot] = []
     @Published private(set) var activeGroupID: UUID?
 
+    private let defaults: UserDefaults
+    private let currentDisplays: () -> [DisplayDescriptor]
     private let accessibility: AccessibilityService
     private var ratios: [CGFloat] = []
     private var selectionOrder: [UUID] = []
@@ -62,6 +66,7 @@ final class WindowCoordinator: ObservableObject {
     )
     private var pendingDividerWrites: [DividerFrameWrite]?
     private var dividerWriteInFlight = false
+    private var dividerWriteSession = WindowFrameWriteSession()
     private var finishDividerWhenWritesComplete = false
     private var dividerFinishCompletion: (() -> Void)?
     private var mouseUpMonitor: Any?
@@ -86,7 +91,8 @@ final class WindowCoordinator: ObservableObject {
     /// pointer-release check reads a minimized window's stale frame and calls it
     /// displaced.
     private var minimizedGroups = GroupMinimizationState<UUID>()
-    private var lastMinimizeTime: [UUID: Date] = [:]
+    private var foregroundActivationPIDs: Set<pid_t> = []
+    private var lastFocusedWindowID: UUID?
     private let groupsKey = "WindowColumns.windowGroups.v1"
     var onLayoutStateChanged: ((Bool) -> Void)?
     var onGroupsChanged: (([WindowGroupSnapshot]) -> Void)?
@@ -96,15 +102,19 @@ final class WindowCoordinator: ObservableObject {
     var onWindowDragStateChanged: ((Bool) -> Void)?
     var onDropTargetChanged: ((CGRect?) -> Void)?
 
-    init(accessibility: AccessibilityService = AccessibilityService()) {
+    init(accessibility: AccessibilityService = AccessibilityService(), defaults: UserDefaults = .standard, currentDisplays: @escaping () -> [DisplayDescriptor] = { DisplayDescriptor.current() }) {
+        self.currentDisplays = currentDisplays
         self.accessibility = accessibility
+        self.defaults = defaults
         // Build 18 removes the old implicit workspace restore mechanism.
-        UserDefaults.standard.removeObject(forKey: "WindowColumns.automaticWorkspaces.v1")
+        defaults.removeObject(forKey: "WindowColumns.automaticWorkspaces.v1")
         accessibilityGranted = accessibility.isTrusted
         selectedDisplayID = displays.first?.id ?? ""
-        if let data = UserDefaults.standard.data(forKey: groupsKey),
+        if let data = defaults.data(forKey: groupsKey),
            let saved = try? JSONDecoder().decode([WindowGroupSnapshot].self, from: data) {
-            groups = saved.compactMap { snapshot in
+            var seenGroupIDs: Set<UUID> = []
+            groups = Array(saved.compactMap { snapshot -> WindowGroupSnapshot? in
+                guard seenGroupIDs.insert(snapshot.id).inserted else { return nil }
                 var normalized = snapshot
                 normalized.windows = uniquePreservingOrder(snapshot.windows)
                 guard normalized.windows.count >= 2 else { return nil }
@@ -118,7 +128,7 @@ final class WindowCoordinator: ObservableObject {
                     )
                 }
                 return normalized
-            }.sorted { $0.slot < $1.slot }
+            }.sorted { $0.slot < $1.slot }.prefix(9))
             for index in groups.indices {
                 groups[index].slot = index
                 groups[index].colorIndex = index % GroupPalette.count
@@ -188,12 +198,12 @@ final class WindowCoordinator: ObservableObject {
     /// Without this, unplugging a monitor left every member of that group sized
     /// for a screen that no longer exists.
     private func handleScreenParametersChanged() {
-        displays = DisplayDescriptor.current()
+        displays = currentDisplays()
         screenChangeWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.screenChangeWorkItem = nil
-            self.displays = DisplayDescriptor.current()
+            self.displays = self.currentDisplays()
             if !self.displays.contains(where: { $0.id == self.selectedDisplayID }) {
                 self.selectedDisplayID = self.displayUnderPointer()?.id ?? self.displays.first?.id ?? ""
             }
@@ -224,6 +234,21 @@ final class WindowCoordinator: ObservableObject {
         if anyStateChanged {
             applyCurrentLayout()
         }
+    }
+
+    func layoutFrame(for display: DisplayDescriptor) -> CGRect {
+        ColumnLayoutEngine.contentFrame(in: display.visibleFrame, padding: CGFloat(windowPadding))
+    }
+
+    func updateWindowPadding(_ value: Double) {
+        windowPadding = value.isFinite ? min(max(value, 0), 64) : 0
+        paddingUpdateWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.selectedWindows.count >= 2, !self.isActiveGroupMinimized else { return }
+            self.applyCurrentLayout()
+        }
+        paddingUpdateWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: item)
     }
 
     var isTrusted: Bool { accessibilityGranted }
@@ -281,17 +306,21 @@ final class WindowCoordinator: ObservableObject {
     /// members before laying them out.
     @discardableResult
     func minimizeGroup(_ id: UUID? = nil) -> Bool {
-        let targetID = id ?? activeGroupID ?? activeGroupContainingFocusedWindow()?.id
+        let targetID = id ?? activeGroupContainingFocusedWindow()?.id
         guard let targetID, groups.contains(where: { $0.id == targetID }) else { return false }
         guard isTrusted else { return false }
 
         // Resolve members from the saved group so this works even when the
         // group is not the one currently selected.
         guard let group = groups.first(where: { $0.id == targetID }) else { return false }
-        refresh(limitedTo: Set(group.windows.map(\.bundleIdentifier)))
+        refresh()
         let indexes = resolveWindowIndexes(for: group.windows)
         guard indexes.count >= 2 else { return false }
 
+        let members = indexes.map { windows[$0] }
+        let focused = accessibility.focusedWindow()
+        let ownedFocus = focused.map { focused in members.contains { CFEqual($0.element, focused) } } ?? false
+        let windowOrder = accessibility.onScreenWindowOrder()
         let isActiveGroup = activeGroupID == targetID
         if isActiveGroup {
             // Order matters: stop the reconciliation machinery before the
@@ -306,7 +335,6 @@ final class WindowCoordinator: ObservableObject {
             accessibility.minimize(windows[index].element)
             windows[index].isMinimized = true
         }
-        lastMinimizeTime[targetID] = Date()
         DistributedNotificationCenter.default().postNotificationName(
             GroupHostChannel.groupMinimized,
             object: targetID.uuidString,
@@ -314,7 +342,23 @@ final class WindowCoordinator: ObservableObject {
             deliverImmediately: true
         )
         if isActiveGroup { onLayoutFramesChanged?([]) }
-        activateNextApplication(excluding: groupPIDs)
+        if ownedFocus {
+            // Choose a window, not an application: the next window may belong
+            // to the same process without belonging to this group.
+            let memberIDs = Set(members.map(\.id))
+            let next = windowOrder.compactMap { number in
+                windows.first { $0.windowID == number && !memberIDs.contains($0.id) && !$0.isMinimized }
+            }.first
+            if let next {
+                if accessibility.frontmostPID != next.pid {
+                    accessibility.makeFrontmost(pid: next.pid, donorPID: nil)
+                }
+                accessibility.raise(next.element)
+                accessibility.focus(next.element)
+            } else {
+                activateNextApplication(excluding: groupPIDs)
+            }
+        }
         return true
     }
 
@@ -336,12 +380,7 @@ final class WindowCoordinator: ObservableObject {
     }
 
     private func activeGroupContainingFocusedWindow() -> WindowGroupSnapshot? {
-        guard let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
-        let appElement = AXUIElementCreateApplication(frontmostPID)
-        var focusedWindowRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef) == .success,
-              let focusedWindow = focusedWindowRef else { return nil }
-        let focusedElem = focusedWindow as! AXUIElement
+        guard let focusedElem = accessibility.focusedWindow() else { return nil }
         for group in groups {
             let indexes = resolveWindowIndexes(for: group.windows)
             if indexes.contains(where: { CFEqual(windows[$0].element, focusedElem) }) {
@@ -397,7 +436,7 @@ final class WindowCoordinator: ObservableObject {
     private func refresh(limitedTo bundleIDs: Set<String>?) {
         accessibilityGranted = accessibility.isTrusted
         if accessibilityGranted { permissionStatusMessage = "" }
-        displays = DisplayDescriptor.current()
+        displays = currentDisplays()
         if !displays.contains(where: { $0.id == selectedDisplayID }) {
             selectedDisplayID = displayUnderPointer()?.id ?? displays.first?.id ?? ""
         }
@@ -577,7 +616,7 @@ final class WindowCoordinator: ObservableObject {
     func fitReport(for windows: [ManagedWindow], on display: DisplayDescriptor?) -> (fit: ColumnFit, blocker: ManagedWindow?)? {
         guard windows.count >= 2, let display else { return nil }
         let fit = ColumnLayoutEngine.fit(
-            in: display.visibleFrame.width,
+            in: layoutFrame(for: display).width,
             minimumWidths: windows.map { $0.minimumSize.width },
             gap: CGFloat(gap)
         )
@@ -599,6 +638,11 @@ final class WindowCoordinator: ObservableObject {
     }
 
     func applyCurrentLayout() {
+        guard !isActiveGroupMinimized else { return }
+        lastError = nil
+        if dividerDragSession != nil || dividerWriteInFlight || pendingDividerWrites != nil {
+            cancelPendingWindowInteraction()
+        }
         let selected = selectedWindows
         guard isTrusted else { lastError = .permissionRequired; return }
         guard selected.count >= 2 else { lastError = .noWindowsSelected; return }
@@ -629,7 +673,7 @@ final class WindowCoordinator: ObservableObject {
             var targets: [CGRect] = []
             for attempt in 0..<3 {
                 targets = try ColumnLayoutEngine.frames(
-                    in: display.visibleFrame,
+                    in: layoutFrame(for: display),
                     ratios: ratios,
                     minimumWidths: effectiveMinimums,
                     gap: CGFloat(gap)
@@ -663,14 +707,14 @@ final class WindowCoordinator: ObservableObject {
                 }
                 if !discoveredConstraint || attempt == 2 { break }
                 let revised = ColumnLayoutEngine.fit(
-                    in: display.visibleFrame.width,
+                    in: layoutFrame(for: display).width,
                     minimumWidths: effectiveMinimums,
                     gap: CGFloat(gap)
                 )
                 if !revised.fits { break }
             }
             let total = appliedWidths.reduce(0, +)
-            let usable = display.visibleFrame.width - CGFloat(gap) * CGFloat(max(0, appliedWidths.count - 1))
+            let usable = layoutFrame(for: display).width - CGFloat(gap) * CGFloat(max(0, appliedWidths.count - 1))
             if total > 0, total <= usable + 1 {
                 ratios = appliedWidths.map { $0 / total }
             }
@@ -708,7 +752,7 @@ final class WindowCoordinator: ObservableObject {
             targetRatios = equalRatios(count: ordered.count)
         }
         guard let frames = try? ColumnLayoutEngine.frames(
-            in: display.visibleFrame,
+            in: layoutFrame(for: display),
             ratios: targetRatios,
             minimumWidths: ordered.map { $0.minimumSize.width },
             gap: CGFloat(gap)
@@ -851,9 +895,6 @@ final class WindowCoordinator: ObservableObject {
 
     @discardableResult
     func activateGroup(_ id: UUID, activationDonorPID: pid_t? = nil) -> Bool {
-        // Prevent immediate auto-restore if macOS cascades activation to the companion
-        // when the group's windows are minimized.
-        guard Date().timeIntervalSince(lastMinimizeTime[id] ?? .distantPast) > 1.5 else { return false }
         guard let group = groups.first(where: { $0.id == id }) else { return false }
         // Only the group's own applications need re-scanning to restore it.
         refresh(limitedTo: Set(group.windows.map(\.bundleIdentifier)))
@@ -950,34 +991,43 @@ final class WindowCoordinator: ObservableObject {
         )
     }
 
-    private func handleApplicationActivated() {
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else { return }
-        let pid = frontmostApp.processIdentifier
-        if pid == ProcessInfo.processInfo.processIdentifier { return }
-
-        for group in groups {
-            if minimizedGroups.contains(group.id) { continue }
-            let indexes = resolveWindowIndexes(for: group.windows)
-            guard indexes.count >= 2 else { continue }
-            let groupWindows = indexes.map { windows[$0] }
-            if groupWindows.contains(where: { $0.pid == pid }) {
-                if activeGroupID != group.id {
-                    activateGroup(group.id, activationDonorPID: pid)
-                } else {
-                    for win in groupWindows where win.pid != pid && !win.isMinimized && !win.isFullScreen {
-                        WindowActivator.raise(win.element)
-                    }
-                    onLayoutFramesChanged?(selectedWindows.map(\.frame))
-                }
-                break
+    func handleApplicationActivated(isFocusChange: Bool = false) {
+        guard let pid = accessibility.frontmostPID else { return }
+        // Activation produces its own workspace and AX notifications. Do not
+        // interpret those as a request to select another group from the same app.
+        if !foregroundActivationPIDs.isEmpty {
+            if foregroundActivationPIDs.contains(pid) {
+                // Ignore our own focus events, but allow an explicit switch to
+                // an unrelated window even when it shares the owner's process.
+                guard let focused = accessibility.focusedWindow(),
+                      !selectedWindows.contains(where: { CFEqual($0.element, focused) }) else { return }
             }
+            invalidateForegroundActivation()
+        }
+        guard pid != ProcessInfo.processInfo.processIdentifier,
+              let focused = accessibility.focusedWindow(),
+              let window = windows.first(where: { $0.pid == pid && CFEqual($0.element, focused) }) else {
+            lastFocusedWindowID = nil
+            return
+        }
+        if isFocusChange, lastFocusedWindowID == window.id { return }
+        lastFocusedWindowID = window.id
+        guard let group = groups(containing: window).first,
+              !minimizedGroups.contains(group.id) else { return }
+
+        if activeGroupID != group.id {
+            _ = restoreGroup(group, preferredWindowID: window.id)
+        } else {
+            bringManagedGroupToFront(preferredWindowID: window.id, activateOwner: false)
         }
     }
 
-    private func restoreGroup(_ group: WindowGroupSnapshot, activationDonorPID: pid_t? = nil) -> Bool {
+    private func restoreGroup(_ group: WindowGroupSnapshot, activationDonorPID: pid_t? = nil, preferredWindowID: UUID? = nil) -> Bool {
         guard isTrusted else { return false }
         if displays.contains(where: { $0.id == group.displayID }) { selectedDisplayID = group.displayID }
         let chosen = resolveWindowIndexes(for: group.windows)
+        // Restore available members, but updateActiveGroupSnapshot must leave
+        // missing members saved so a transient AX failure cannot delete them.
         guard chosen.count >= 2 else { return false }
 
         // Whatever happens next is a restore, so this group is no longer being
@@ -1003,41 +1053,75 @@ final class WindowCoordinator: ObservableObject {
         setSelection(inOrder: chosen.map { windows[$0].id })
         gap = min(max(group.gap, 0), 64)
         ratios = group.ratios.count == chosen.count ? group.ratios.map { CGFloat($0) } : equalRatios(count: chosen.count)
-        applyCurrentLayout()
-        bringManagedGroupToFront(activationDonorPID: activationDonorPID)
+        // Activation must not reflow windows which already occupy their slots.
+        // Besides extra AX traffic, those writes can feed back as resize events.
+        if !currentLayoutIsInPlace() { applyCurrentLayout() }
+        bringManagedGroupToFront(activationDonorPID: activationDonorPID, preferredWindowID: preferredWindowID)
         return true
     }
 
-    private func bringManagedGroupToFront(activationDonorPID: pid_t? = nil) {
+    private func currentLayoutIsInPlace() -> Bool {
+        let selected = selectedWindows
+        guard let display = selectedDisplay,
+              let targets = try? ColumnLayoutEngine.frames(
+                in: layoutFrame(for: display), ratios: ratios,
+                minimumWidths: selected.map { $0.isFullScreen ? 100 : $0.minimumSize.width },
+                gap: CGFloat(gap)
+              ), targets.count == selected.count else { return false }
+        return zip(selected, targets).allSatisfy { window, target in
+            window.isFullScreen || (!window.isMinimized && framesNearlyEqual(window.frame, target))
+        }
+    }
+
+    private func groupIsInFront(_ group: [ManagedWindow]) -> Bool {
+        let desktop = group.filter { !$0.isFullScreen }
+        let target = desktop.isEmpty ? group : desktop
+        let numbers = Set(target.compactMap(\.windowID))
+        guard numbers.count == target.count else {
+            return accessibility.focusedWindow().map { focused in
+                target.contains { CFEqual($0.element, focused) }
+            } ?? false
+        }
+        return Set(accessibility.onScreenWindowOrder().prefix(numbers.count)) == numbers
+    }
+
+    private func bringManagedGroupToFront(activationDonorPID: pid_t? = nil, preferredWindowID: UUID? = nil, activateOwner: Bool = true) {
         let group = selectedWindows
         guard group.count >= 2, let groupID = activeGroupID else { return }
 
         foregroundActivationGeneration &+= 1
         let generation = foregroundActivationGeneration
+        foregroundActivationPIDs = Set(group.map(\.pid))
+        if let activationDonorPID { foregroundActivationPIDs.insert(activationDonorPID) }
         raiseManagedGroup(
             group,
             groupID: groupID,
             generation: generation,
-            activateOwner: true,
-            donorPID: activationDonorPID
+            activateOwner: activateOwner,
+            donorPID: activationDonorPID,
+            preferredWindowID: preferredWindowID
         )
 
-        // A Command-Tab activation arrives while macOS is still transferring focus
-        // away from the lightweight group host. Repeat the exact-window raise after
-        // that transfer settles so every member appears on the first Command-Tab.
-        for (delay, activateOwner) in [(0.06, true), (0.18, false)] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self,
-                      self.foregroundActivationGeneration == generation,
-                      self.activeGroupID == groupID else { return }
+        // Verify once after the handoff; do not replay focus/activation on a
+        // group which is already in front. Electron emits focus events for each
+        // raise, so unconditional retries visibly alternate the active title bar.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self,
+                  self.foregroundActivationGeneration == generation,
+                  self.activeGroupID == groupID else { return }
+            if let focused = self.accessibility.focusedWindow(),
+               !self.selectedWindows.contains(where: { CFEqual($0.element, focused) }) {
+                self.invalidateForegroundActivation()
+                return
+            }
+            if !self.groupIsInFront(self.selectedWindows) {
                 self.raiseManagedGroup(
-                    self.selectedWindows,
-                    groupID: groupID,
-                    generation: generation,
-                    activateOwner: activateOwner,
-                    donorPID: activationDonorPID
+                    self.selectedWindows, groupID: groupID, generation: generation,
+                    activateOwner: false, donorPID: activationDonorPID,
+                    preferredWindowID: preferredWindowID
                 )
             }
+            self.foregroundActivationPIDs.removeAll()
         }
     }
 
@@ -1046,7 +1130,8 @@ final class WindowCoordinator: ObservableObject {
         groupID: UUID,
         generation: Int,
         activateOwner: Bool,
-        donorPID: pid_t?
+        donorPID: pid_t?,
+        preferredWindowID: UUID?
     ) {
         guard foregroundActivationGeneration == generation,
               activeGroupID == groupID,
@@ -1056,27 +1141,31 @@ final class WindowCoordinator: ObservableObject {
         // prioritize the desktop windows to prevent whipping Spaces.
         let desktopWindows = group.filter { !$0.isFullScreen }
         let targetGroup = desktopWindows.isEmpty ? group : desktopWindows
-        let activeMain = (donorPID != nil ? targetGroup.first(where: { $0.pid == donorPID }) : nil) ?? targetGroup.last
+        let activeMain = targetGroup.first(where: { $0.id == preferredWindowID }) ?? targetGroup.last
         guard let activeMain else { return }
 
         // Activate only the main owner. Activating every owner in sequence makes
         // multi-app groups flicker and can expose unrelated windows from those apps.
         // Activation raises all of that application's windows, so it has to happen
         // before the members owned by the other applications are raised.
-        if activateOwner {
-            WindowActivator.makeFrontmost(pid: activeMain.pid, donorPID: donorPID)
+        if activateOwner, accessibility.frontmostPID != activeMain.pid {
+            accessibility.makeFrontmost(pid: activeMain.pid, donorPID: donorPID)
         }
-        for window in targetGroup {
-            WindowActivator.raise(window.element)
+        // Record our intended focus before generating AX events, including
+        // events delivered after the short activation guard has expired.
+        lastFocusedWindowID = activeMain.id
+        for window in targetGroup where window.id != activeMain.id {
+            accessibility.raise(window.element)
         }
-
-        // Number 1 is the rightmost card, stored as the last physical column.
-        WindowActivator.raise(activeMain.element)
-        WindowActivator.focus(activeMain.element)
+        accessibility.raise(activeMain.element)
+        if accessibility.focusedWindow().map({ CFEqual($0, activeMain.element) }) != true {
+            accessibility.focus(activeMain.element)
+        }
     }
 
     private func invalidateForegroundActivation() {
         foregroundActivationGeneration &+= 1
+        foregroundActivationPIDs.removeAll()
     }
 
     private func handleAccessibilityEvent(element: AXUIElement, notification: String) {
@@ -1088,6 +1177,7 @@ final class WindowCoordinator: ObservableObject {
                     return
                 }
             }
+            handleApplicationActivated(isFocusChange: true)
             return
         }
         if notification == kAXUIElementDestroyedNotification as String {
@@ -1146,6 +1236,8 @@ final class WindowCoordinator: ObservableObject {
             // it belongs to its own Space and should not disrupt the group columns.
             return
         }
+        // Our own activation/layout events are not user resize gestures.
+        if isApplyingLayout || !foregroundActivationPIDs.isEmpty { return }
         if let suppression = suppressedFrameEvents[window.id], suppression.expires > Date() {
             if let current = accessibility.currentFrame(of: element),
                framesNearlyEqual(current, suppression.target) {
@@ -1213,7 +1305,7 @@ final class WindowCoordinator: ObservableObject {
             let slotFrames: [CGRect]
             if let display = selectedDisplay,
                let targets = try? ColumnLayoutEngine.frames(
-                    in: display.visibleFrame,
+                    in: layoutFrame(for: display),
                     ratios: ratios.count == selected.count ? ratios : equalRatios(count: selected.count),
                     minimumWidths: selected.map { $0.minimumSize.width },
                     gap: CGFloat(gap)
@@ -1299,7 +1391,10 @@ final class WindowCoordinator: ObservableObject {
         if selectedWindows.count >= 2, mouseUpMonitor == nil {
             mouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
                 let location = NSEvent.mouseLocation
-                Task { @MainActor in self?.pointerDownLocation = location }
+                Task { @MainActor in
+                    self?.invalidateForegroundActivation()
+                    self?.pointerDownLocation = location
+                }
             }
             mouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { [weak self] _ in
                 let location = NSEvent.mouseLocation
@@ -1363,7 +1458,7 @@ final class WindowCoordinator: ObservableObject {
         guard selected.count >= 2, let display = selectedDisplay else { return }
         if ratios.count != selected.count { ratios = equalRatios(count: selected.count) }
         guard let targets = try? ColumnLayoutEngine.frames(
-            in: display.visibleFrame,
+            in: layoutFrame(for: display),
             ratios: ratios,
             minimumWidths: selected.map { $0.minimumSize.width },
             gap: CGFloat(gap)
@@ -1407,7 +1502,7 @@ final class WindowCoordinator: ObservableObject {
             // the user keeps their resize. Anything else — an outer edge, a
             // corner, a height change — no longer forms a connected group, so
             // the previous proportions are restored instead.
-            let available = display.visibleFrame.width - CGFloat(gap) * CGFloat(selected.count - 1)
+            let available = layoutFrame(for: display).width - CGFloat(gap) * CGFloat(selected.count - 1)
             let total = actualWidths.reduce(0, +)
             if total > 0, abs(total - available) <= 2 {
                 ratios = actualWidths.map { $0 / total }
@@ -1482,6 +1577,13 @@ final class WindowCoordinator: ObservableObject {
     }
 
     private func cancelPendingWindowInteraction() {
+        dividerWriteSession.cancel()
+        dividerWriteSession = WindowFrameWriteSession()
+        pendingDividerWrites = nil
+        dividerDragSession = nil
+        finishDividerWhenWritesComplete = false
+        let dividerCompletion = dividerFinishCompletion
+        dividerFinishCompletion = nil
         pendingResize?.cancel()
         pendingResize = nil
         pendingFrameEvents.removeAll()
@@ -1494,6 +1596,7 @@ final class WindowCoordinator: ObservableObject {
         groupVerificationWorkItem?.cancel()
         groupVerificationWorkItem = nil
         pointerDownLocation = nil
+        dividerCompletion?()
     }
 
     private func saveAutomaticWorkspace() {
@@ -1505,6 +1608,7 @@ final class WindowCoordinator: ObservableObject {
               let index = groups.firstIndex(where: { $0.id == activeGroupID }),
               let display = selectedDisplay,
               selectedWindows.count >= 2,
+              selectedWindows.count == groups[index].windows.count,
               ratios.count == selectedWindows.count else { return }
         groups[index].displayID = display.id
         groups[index].gap = gap
@@ -1547,7 +1651,7 @@ final class WindowCoordinator: ObservableObject {
         compactGroupSlots()
         minimizedGroups.retain(only: groups.map(\.id))
         if let data = try? JSONEncoder().encode(groups) {
-            UserDefaults.standard.set(data, forKey: groupsKey)
+            defaults.set(data, forKey: groupsKey)
         }
         onGroupsChanged?(groups)
         onLayoutStateChanged?(!groups.isEmpty)
@@ -1555,7 +1659,9 @@ final class WindowCoordinator: ObservableObject {
 
     func dragDivider(after divider: Int, by delta: CGFloat) {
         let selected = selectedWindows
-        guard divider >= 0, divider < selected.count - 1 else { return }
+        guard !isActiveGroupMinimized,
+              divider >= 0, divider < selected.count - 1,
+              !selected[divider].isFullScreen, !selected[divider + 1].isFullScreen else { return }
         if dividerDragSession?.divider != divider
             || dividerDragSession?.widths.count != selected.count {
             dividerDragSession = (
@@ -1590,7 +1696,7 @@ final class WindowCoordinator: ObservableObject {
               ratios.count == selected.count else { return }
         do {
             let targets = try ColumnLayoutEngine.frames(
-                in: display.visibleFrame,
+                in: layoutFrame(for: display),
                 ratios: ratios,
                 minimumWidths: selected.map { $0.minimumSize.width },
                 gap: CGFloat(gap)
@@ -1625,24 +1731,31 @@ final class WindowCoordinator: ObservableObject {
         pendingDividerWrites = nil
         dividerWriteInFlight = true
         let frameService = accessibility
+        let session = dividerWriteSession
         dividerWriteQueue.async { [weak self] in
             var results: [(UUID, CGRect)] = []
             var failure: String?
             for write in writes {
                 do {
-                    results.append((write.windowID, try frameService.setFrame(write.target, of: write.element)))
+                    guard let frame = try frameService.setFrame(write.target, of: write.element, session: session) else { break }
+                    results.append((write.windowID, frame))
                 } catch {
                     failure = error.localizedDescription
                     break
                 }
             }
             DispatchQueue.main.async {
-                self?.didCompleteDividerWrite(results: results, failure: failure)
+                self?.didCompleteDividerWrite(results: results, failure: failure, session: session)
             }
         }
     }
 
-    private func didCompleteDividerWrite(results: [(UUID, CGRect)], failure: String?) {
+    private func didCompleteDividerWrite(results: [(UUID, CGRect)], failure: String?, session: WindowFrameWriteSession) {
+        if session.isCancelled {
+            dividerWriteInFlight = false
+            startNextDividerWriteIfNeeded()
+            return
+        }
         for (id, frame) in results {
             if let index = windows.firstIndex(where: { $0.id == id }) {
                 windows[index].frame = frame

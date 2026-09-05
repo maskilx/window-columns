@@ -9,6 +9,11 @@ private func approximatelyEqual(_ lhs: CGFloat, _ rhs: CGFloat) -> Bool {
 @main
 struct LayoutEngineChecks {
     static func main() throws {
+        let outer = CGRect(x: -1500, y: 400, width: 1200, height: 900)
+        precondition(ColumnLayoutEngine.contentFrame(in: outer, padding: 24) == outer.insetBy(dx: 24, dy: 24))
+        precondition(ColumnLayoutEngine.contentFrame(in: outer, padding: 0) == outer)
+        precondition(ColumnLayoutEngine.contentFrame(in: outer, padding: -.infinity) == outer)
+        precondition(ColumnLayoutEngine.contentFrame(in: outer, padding: 10000).height > 0)
         let equal = try ColumnLayoutEngine.frames(
             in: CGRect(x: 0, y: 25, width: 1000, height: 500),
             ratios: [1, 1, 1], minimumWidths: [100, 100, 100], gap: 10
@@ -76,6 +81,8 @@ struct LayoutEngineChecks {
         precondition(ColumnLayoutEngine.nearestColumnIndex(to: 608, in: slots) == 1)
 
         checkWindowMatching()
+        checkCompanionLaunchGate()
+        checkCompanionActivationState()
         checkFingerprintMatching()
         checkDisplacementClassification()
         checkFit()
@@ -175,6 +182,36 @@ struct LayoutEngineChecks {
                 actual: CGRect(x: 100, y: 200, width: 400, height: 700), target: slot
             ) == .resized
         )
+    }
+
+    private static func checkCompanionActivationState() {
+        var state = CompanionActivationState()
+        let now = Date(timeIntervalSince1970: 100)
+        precondition(state.beginRequest(at: now), "The first Command-Tab must work immediately after launch")
+        precondition(!state.beginRequest(at: now.addingTimeInterval(0.1), explicit: true), "Dock reopen coalesces with activation")
+        state.didMinimize(at: now.addingTimeInterval(1))
+        precondition(!state.beginRequest(at: now.addingTimeInterval(1.1)), "Suppress the minimize cascade")
+        precondition(state.beginRequest(at: now.addingTimeInterval(1.4)), "Command-Tab restores a minimized group")
+        state.didMinimize(at: now.addingTimeInterval(2))
+        precondition(state.beginRequest(at: now.addingTimeInterval(2.01), explicit: true), "Show Group bypasses cascade suppression")
+    }
+
+    private static func checkCompanionLaunchGate() {
+        var gate = CompanionLaunchGate<String>()
+        let now = Date(timeIntervalSince1970: 100)
+        let first = gate.begin("group", now: now)!
+        precondition(gate.begin("group", now: now) == nil, "Repeated sync must not launch twice")
+        precondition(gate.begin("other", now: now) != nil, "Groups launch independently")
+        gate.cancel("group")
+        let replacement = gate.begin("group", now: now)!
+        precondition(!gate.complete("group", token: first), "Deleted/renumbered launch callback is stale")
+        precondition(gate.isPending("group"), "Stale completion must not consume the replacement")
+        precondition(gate.complete("group", token: replacement))
+        gate.deferRetry("group", until: now.addingTimeInterval(30))
+        precondition(gate.begin("group", now: now.addingTimeInterval(29)) == nil,
+                     "Reconciliation must not bypass crash backoff")
+        precondition(gate.retryDelay(for: "group", now: now) == 30)
+        precondition(gate.begin("group", now: now.addingTimeInterval(30)) != nil)
     }
 
     private static func checkWindowMatching() {
@@ -318,8 +355,8 @@ struct LayoutEngineChecks {
         precondition(rc < normal)
 
         // AppVersion checks
-        precondition(AppVersion.current == "0.1.0-beta.3")
-        precondition(AppVersion.semantic == SemanticVersion(string: "0.1.0-beta.3")!)
+        precondition(AppVersion.current == "0.1.0-beta.4")
+        precondition(AppVersion.semantic == SemanticVersion(string: "0.1.0-beta.4")!)
 
         // JSON Codable roundtrip
         do {

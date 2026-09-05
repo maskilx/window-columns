@@ -15,7 +15,11 @@ guard FileManager.default.fileExists(atPath: helperURL.path) else {
     exit(2)
 }
 
-let helperBundleID = "com.adimaskil.WindowColumns.Group9"
+guard let helperBundleID = Bundle(url: helperURL)?.bundleIdentifier,
+      helperBundleID.hasPrefix("com.adimaskil.WindowColumns.Tests.") else {
+    fputs("Use Scripts/test-helper.sh to create an isolated companion; refusing to stop user companions.\n", stderr)
+    exit(2)
+}
 
 /// The helper declares LSMultipleInstancesProhibited, so a leaked instance from
 /// an earlier run is handed back by LaunchServices instead of a fresh one — and
@@ -33,6 +37,7 @@ func terminateExistingHelpers() {
 terminateExistingHelpers()
 
 let expectedGroupID = UUID().uuidString
+var requestCount = 0
 var receivedGroupID: String?
 var receivedHelperPID: pid_t?
 var launchedApplication: NSRunningApplication?
@@ -51,6 +56,7 @@ let observer = DistributedNotificationCenter.default().addObserver(
     let helperPID = parts.count > 1 ? pid_t(String(parts[1])) : nil
 
     Task { @MainActor in
+        requestCount += 1
         receivedGroupID = groupID
         receivedHelperPID = helperPID
 
@@ -81,14 +87,14 @@ NSWorkspace.shared.openApplication(at: helperURL, configuration: configuration) 
     }
 }
 
-// The helper suppresses activations for the first second after launch so a
-// controller start-up that spawns nine companions never steals focus.
+// Background launch must not suppress the first real activation.
 let launchDeadline = Date().addingTimeInterval(4)
 while launchedApplication == nil, launchError == nil, Date() < launchDeadline {
     RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
 }
-RunLoop.current.run(until: Date().addingTimeInterval(1.2))
-// Activate the way Command-Tab effectively does. Two things do not work here:
+// LaunchServices exercises activation plus Dock reopen. Native Command-Tab
+// does not emit reopen and is covered separately by the activation state checks.
+// Two things do not work here:
 // `NSRunningApplication.activate()` from a background command-line process is
 // denied by the same cooperative activation rules this app exists to work
 // around, and `open -b` cannot resolve the bundle identifier because helpers
@@ -128,6 +134,11 @@ guard receivedHelperPID == launchedApplication.processIdentifier else {
         "Activation notification carried helper pid \(receivedHelperPID.map(String.init) ?? "none"), "
             + "expected \(launchedApplication.processIdentifier)"
     )
+}
+
+RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+guard requestCount == 1 else {
+    fail("A single activation sent \(requestCount) restore requests")
 }
 
 _ = launchedApplication.forceTerminate()

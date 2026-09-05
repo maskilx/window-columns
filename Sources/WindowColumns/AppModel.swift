@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
         coordinator = WindowCoordinator()
         store = LayoutStore()
         coordinator.gap = store.preferences.gap
+        coordinator.windowPadding = store.preferences.windowPadding
         coordinator.onLayoutStateChanged = { [weak self] active in
             self?.setLayoutActive(active)
         }
@@ -46,6 +47,12 @@ final class AppModel: ObservableObject {
     func updateGap(_ value: Double) {
         coordinator.gap = value
         store.preferences.gap = value
+    }
+
+    func updateWindowPadding(_ value: Double) {
+        let padding = value.isFinite ? min(max(value, 0), 64) : 0
+        store.preferences.windowPadding = padding
+        coordinator.updateWindowPadding(padding)
     }
 
     /// Forces the app's own windows to one appearance, or follows the system.

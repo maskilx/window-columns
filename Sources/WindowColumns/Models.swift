@@ -127,6 +127,7 @@ enum SwitcherDesignStyle: String, Codable, CaseIterable, Identifiable {
 
 struct LayoutPreferences: Codable, Equatable {
     var gap: Double
+    var windowPadding: Double
     var launchAtLogin: Bool
     var showWindowPreviews: Bool
     var showDockIcon: Bool
@@ -148,6 +149,7 @@ struct LayoutPreferences: Codable, Equatable {
 
     init(
         gap: Double = 8,
+        windowPadding: Double = 0,
         launchAtLogin: Bool = false,
         showWindowPreviews: Bool = true,
         showDockIcon: Bool = false,
@@ -164,6 +166,7 @@ struct LayoutPreferences: Codable, Equatable {
         lastUpdateCheckDate: Date? = nil
     ) {
         self.gap = gap
+        self.windowPadding = windowPadding
         self.launchAtLogin = launchAtLogin
         self.showWindowPreviews = showWindowPreviews
         self.showDockIcon = showDockIcon
@@ -181,7 +184,7 @@ struct LayoutPreferences: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case gap, launchAtLogin, showWindowPreviews, showDockIcon, appearance, switcherDesignStyle, geminiAPIKey
+        case gap, windowPadding, launchAtLogin, showWindowPreviews, showDockIcon, appearance, switcherDesignStyle, geminiAPIKey
         case columnModifierFlags, undoShortcut, openChooserShortcut, createGroupShortcut
         case doubleTapModifier, minimizeGroupShortcut
         case automaticallyChecksForUpdates, lastUpdateCheckDate
@@ -192,6 +195,7 @@ struct LayoutPreferences: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         gap = try container.decodeIfPresent(Double.self, forKey: .gap) ?? 8
+        windowPadding = min(max(try container.decodeIfPresent(Double.self, forKey: .windowPadding) ?? 0, 0), 64)
         launchAtLogin = try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
         showWindowPreviews = try container.decodeIfPresent(Bool.self, forKey: .showWindowPreviews) ?? true
         showDockIcon = try container.decodeIfPresent(Bool.self, forKey: .showDockIcon) ?? false
