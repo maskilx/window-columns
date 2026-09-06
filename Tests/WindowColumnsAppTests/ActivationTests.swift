@@ -324,6 +324,22 @@ struct ActivationTests {
 
     @MainActor
     @Test
+    func testHandoffRetriesWhenHelperStillOwnsActivation() async throws {
+        let (coordinator, service, windows, _) = fixture()
+        let id = coordinator.createGroup(inOrder: [windows[0].id, windows[1].id])!
+        #expect(coordinator.activateGroup(id, activationDonorPID: 10002))
+        // The initial raise succeeded but LaunchServices left the helper active.
+        service.activePID = 10002
+        service.focused = nil
+        let raises = service.raised.count
+        try await Task.sleep(nanoseconds: 250_000_000)
+        #expect(service.activePID == windows[1].pid)
+        #expect(service.raised.count == raises + 2)
+        coordinator.clearSelection()
+    }
+
+    @MainActor
+    @Test
     func testIncompleteScanDoesNotShrinkSavedGroup() {
         let (coordinator, service, windows, defaults) = fixture()
         let id = coordinator.createGroup(inOrder: [windows[0].id, windows[1].id, windows[2].id])!

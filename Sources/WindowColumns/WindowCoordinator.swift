@@ -1119,15 +1119,20 @@ final class WindowCoordinator: ObservableObject {
             guard let self,
                   self.foregroundActivationGeneration == generation,
                   self.activeGroupID == groupID else { return }
-            if let focused = self.accessibility.focusedWindow(),
+            // A successful window raise can precede the application's actual
+            // activation. Retry ownership only while the donating helper still
+            // owns it; never steal activation back from another real app.
+            let helperStillActive = activationDonorPID != nil
+                && self.accessibility.frontmostPID == activationDonorPID
+            if !helperStillActive, let focused = self.accessibility.focusedWindow(),
                !self.selectedWindows.contains(where: { CFEqual($0.element, focused) }) {
                 self.invalidateForegroundActivation()
                 return
             }
-            if !self.groupIsInFront(self.selectedWindows) {
+            if helperStillActive || !self.groupIsInFront(self.selectedWindows) {
                 self.raiseManagedGroup(
                     self.selectedWindows, groupID: groupID, generation: generation,
-                    activateOwner: false, donorPID: activationDonorPID,
+                    activateOwner: helperStillActive, donorPID: activationDonorPID,
                     preferredWindowID: preferredWindowID
                 )
             }

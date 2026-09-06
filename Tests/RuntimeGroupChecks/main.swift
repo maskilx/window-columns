@@ -213,6 +213,8 @@ for group in groups {
 
     // A successful handoff must stay stable, rather than repeatedly raising
     // siblings or reapplying slightly different frames after activation.
+    // Allow the controller's bounded 150ms handoff verification to finish.
+    RunLoop.current.run(until: Date().addingTimeInterval(0.25))
     let settled = onScreenWindows().filter { expected.contains($0.number) }
     var stable = true
     for _ in 0..<20 {

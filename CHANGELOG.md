@@ -8,7 +8,20 @@ While the project is in beta, compatibility may change between minor releases.
 
 ## [Unreleased]
 
+## [0.1.0-beta.6] - 2026-09-06
+
+### Fixed
+
+- Retry application activation when the donating companion still owns the foreground even though group windows are already on top. Preserve cancellation when the user switches to another app.
+- Include the minimization, proportion-preservation, and update-download fixes from the unpublished Beta 5 source tag.
+
+### Tests
+
+- Added a helper-ownership regression (22 app tests total). Live stability sampling starts after the bounded activation verification has completed.
+
 ## [0.1.0-beta.5] - 2026-09-06
+
+Source tag only; binary publication was held after live testing exposed an activation handoff issue. Superseded by Beta 6.
 
 ### Fixed
 
@@ -110,7 +123,8 @@ While the project is in beta, compatibility may change between minor releases.
 
 - Kept unrelated groups interactive when one or more other groups are minimized.
 
-[Unreleased]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.5...HEAD
+[Unreleased]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.6...HEAD
+[0.1.0-beta.6]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.5...v0.1.0-beta.6
 [0.1.0-beta.5]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.4...v0.1.0-beta.5
 [0.1.0-beta.4]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.3...v0.1.0-beta.4
 [0.1.0-beta.3]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.2...v0.1.0-beta.3
