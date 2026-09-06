@@ -230,6 +230,19 @@ struct WindowGroupSnapshot: Codable, Identifiable, Equatable {
     var ratios: [Double]
     var windows: [WindowFingerprint]
     var updatedAt: Date
+
+    mutating func removeWindows(where shouldRemove: (WindowFingerprint) -> Bool) {
+        let kept = windows.indices.filter { !shouldRemove(windows[$0]) }
+        guard kept.count != windows.count else { return }
+        let weights = kept.map { ratios.indices.contains($0) ? ratios[$0] : 1 }
+            .map { $0.isFinite ? max(0, $0) : 0 }
+        let total = weights.reduce(0, +)
+        ratios = total > 0 ? weights.map { $0 / total }
+            : Array(repeating: 1 / Double(max(1, kept.count)), count: kept.count)
+        windows = kept.map { windows[$0] }
+        updatedAt = Date()
+    }
+
 }
 
 enum LayoutError: LocalizedError, Identifiable {

@@ -250,6 +250,79 @@ struct ActivationTests {
     }
 
     @MainActor
+    @Test(arguments: [2, 4])
+    func testBatchMinimizeNeverResizesMinimizedMembers(count: Int) {
+        let (coordinator, service, windows, _) = fixture()
+        _ = coordinator.createGroup(inOrder: Array(windows.prefix(4)).map(\.id))
+        service.minimized = Array(windows.prefix(count)).map(\.element)
+        var writes: [AXUIElement] = []
+        service.writeHook = { writes.append($0) }
+        service.focused = windows[4].element
+        service.eventHandler?(windows[4].element, kAXFocusedWindowChangedNotification as String)
+        #expect(!writes.contains { service.isMinimized($0) })
+        #expect(coordinator.selectedWindows.count == 4 - count)
+        #expect(coordinator.groups.count == (count == 4 ? 0 : 1))
+        coordinator.clearSelection()
+    }
+
+    @MainActor
+    @Test
+    func testClosingMiddleMemberPreservesSurvivorProportions() {
+        let (coordinator, service, windows, _) = fixture()
+        _ = coordinator.createGroup(inOrder: Array(windows.prefix(3)).map(\.id), preferredRatios: [0.2, 0.2, 0.6])
+        service.live = [windows[0], windows[2], windows[3], windows[4]]
+        service.eventHandler?(windows[1].element, kAXUIElementDestroyedNotification as String)
+        #expect(coordinator.selectedWindows.map(\.id) == [windows[0].id, windows[2].id])
+        #expect(abs(coordinator.groups[0].ratios[0] - 0.25) < 0.001)
+        #expect(abs(coordinator.groups[0].ratios[1] - 0.75) < 0.001)
+        coordinator.clearSelection()
+    }
+
+    @MainActor
+    @Test
+    func testClosingMemberOfMinimizedGroupKeepsOtherMembers() {
+        let (coordinator, service, windows, _) = fixture()
+        let id = coordinator.createGroup(inOrder: Array(windows.prefix(4)).map(\.id))!
+        service.focused = windows[4].element
+        #expect(coordinator.minimizeGroup(id))
+        service.live = Array(windows.dropFirst())
+        service.eventHandler?(windows[0].element, kAXUIElementDestroyedNotification as String)
+        #expect(coordinator.groups.first?.windows.count == 3)
+        #expect(coordinator.isActiveGroupMinimized)
+        #expect(service.isMinimized(windows[1].element))
+        coordinator.clearSelection()
+    }
+
+    @MainActor
+    @Test
+    func testRegroupingPreservesOriginalGroupProportions() {
+        let (coordinator, _, windows, _) = fixture()
+        let original = coordinator.createGroup(inOrder: Array(windows.prefix(3)).map(\.id), preferredRatios: [0.2, 0.2, 0.6])!
+        _ = coordinator.createGroup(inOrder: [windows[1].id, windows[3].id])
+        let remaining = coordinator.groups.first { $0.id == original }!
+        #expect(remaining.windows.count == 2)
+        #expect(abs(remaining.ratios[0] - 0.25) < 0.001)
+        #expect(abs(remaining.ratios[1] - 0.75) < 0.001)
+        coordinator.clearSelection()
+    }
+
+    @MainActor
+    @Test
+    func testUpdateDownloadsMatchArchitecture() {
+        let arm = UpdateService.GitHubAsset(name: "Window-Columns-v1-macos-arm64.zip", browserDownloadUrl: "https://github.com/arm.zip", size: 100)
+        let intel = UpdateService.GitHubAsset(name: "Window-Columns-v1-macos-x86_64.zip", browserDownloadUrl: "https://github.com/intel.zip", size: 100)
+        let universal = UpdateService.GitHubAsset(name: "Window-Columns-v1-macos-universal.zip", browserDownloadUrl: "https://github.com/universal.zip", size: 100)
+        #expect(UpdateService.downloadURL(from: [arm], architecture: "x86_64") == nil)
+        #expect(UpdateService.downloadURL(from: [universal, arm, intel], architecture: "x86_64") == URL(string: intel.browserDownloadUrl))
+        #expect(UpdateService.downloadURL(from: [intel, arm], architecture: "arm64") == URL(string: arm.browserDownloadUrl))
+        #expect(UpdateService.downloadURL(from: [arm, universal], architecture: "x86_64") == URL(string: universal.browserDownloadUrl))
+        let source = UpdateService.GitHubAsset(name: "source.zip", browserDownloadUrl: "https://github.com/source.zip", size: 100)
+        let empty = UpdateService.GitHubAsset(name: arm.name, browserDownloadUrl: arm.browserDownloadUrl, size: 0)
+        let insecure = UpdateService.GitHubAsset(name: arm.name, browserDownloadUrl: "http://github.com/arm.zip", size: 100)
+        #expect(UpdateService.downloadURL(from: [source, empty, insecure], architecture: "arm64") == nil)
+    }
+
+    @MainActor
     @Test
     func testIncompleteScanDoesNotShrinkSavedGroup() {
         let (coordinator, service, windows, defaults) = fixture()

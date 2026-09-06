@@ -8,6 +8,18 @@ While the project is in beta, compatibility may change between minor releases.
 
 ## [Unreleased]
 
+## [0.1.0-beta.5] - 2026-09-06
+
+### Fixed
+
+- Detach all simultaneously minimized members before reflowing a group, avoiding frame writes to minimized windows.
+- Preserve the remaining column proportions when a member closes or moves to another group; reconcile the active selection before reflowing after a close.
+- Select update downloads matching the running architecture, with universal fallback; reject empty, insecure, and unrelated ZIP assets.
+
+### Tests
+
+- Added batch-minimization, close/regroup proportion, and architecture-specific update regressions. The coordinator suite now contains 21 tests.
+
 ## [0.1.0-beta.4] - 2026-09-05
 
 ### Added
@@ -98,7 +110,8 @@ While the project is in beta, compatibility may change between minor releases.
 
 - Kept unrelated groups interactive when one or more other groups are minimized.
 
-[Unreleased]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.4...HEAD
+[Unreleased]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.5...HEAD
+[0.1.0-beta.5]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.4...v0.1.0-beta.5
 [0.1.0-beta.4]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.3...v0.1.0-beta.4
 [0.1.0-beta.3]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.2...v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/maskilx/window-columns/compare/v0.1.0-beta.1...v0.1.0-beta.2

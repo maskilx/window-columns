@@ -501,19 +501,24 @@ final class WindowCoordinator: ObservableObject {
     }
 
     func detachWindow(_ id: UUID, makeMain: Bool = false) {
+        detachWindows([id], makeMain: makeMain)
+    }
+
+    private func detachWindows(_ ids: Set<UUID>, makeMain: Bool = false) {
         invalidateForegroundActivation()
         cancelPendingWindowInteraction()
         let selected = selectedWindows
-        guard let removedOffset = selected.firstIndex(where: { $0.id == id }) else { return }
-        let detached = selected[removedOffset]
+        guard let detached = selected.first(where: { ids.contains($0.id) }) else { return }
 
         if ratios.count == selected.count {
-            ratios.remove(at: removedOffset)
+            ratios = selected.indices.filter { !ids.contains(selected[$0].id) }.map { ratios[$0] }
             let total = ratios.reduce(0, +)
             if total > 0 { ratios = ratios.map { $0 / total } }
         }
-        if let index = windows.firstIndex(where: { $0.id == id }) { windows[index].isSelected = false }
-        selectionOrder.removeAll { $0 == id }
+        for index in windows.indices where ids.contains(windows[index].id) {
+            windows[index].isSelected = false
+        }
+        selectionOrder.removeAll { ids.contains($0) }
 
         if selectedWindows.count >= 2 {
             if let activeGroupID, let groupIndex = groups.firstIndex(where: { $0.id == activeGroupID }) {
@@ -543,11 +548,16 @@ final class WindowCoordinator: ObservableObject {
 
     private func handleSingleWindowMinimized(_ id: UUID) {
         guard !isActiveGroupMinimized else { return }
-        guard let window = selectedWindows.first(where: { $0.id == id }) else { return }
-        if let index = windows.firstIndex(where: { $0.id == window.id }) {
+        guard selectedWindows.contains(where: { $0.id == id }) else { return }
+        // Option-minimize and rapid consecutive minimizes can arrive together.
+        // Remove every minimized member before laying out the survivors.
+        let minimizedIDs = Set(selectedWindows.filter {
+            $0.id == id || accessibility.isMinimized($0.element)
+        }.map(\.id))
+        for index in windows.indices where minimizedIDs.contains(windows[index].id) {
             windows[index].isMinimized = true
         }
-        detachWindow(window.id, makeMain: false)
+        detachWindows(minimizedIDs)
     }
 
     func selectDisplay(containing point: CGPoint) {
@@ -1182,6 +1192,11 @@ final class WindowCoordinator: ObservableObject {
         }
         if notification == kAXUIElementDestroyedNotification as String {
             if let destroyed = windows.first(where: { CFEqual($0.element, element) }) {
+                if destroyed.isSelected {
+                    detachWindows(Set(selectedWindows.filter {
+                        $0.id == destroyed.id || (!isActiveGroupMinimized && accessibility.isMinimized($0.element))
+                    }.map(\.id)))
+                }
                 removeClosedWindowFromGroups(destroyed.fingerprint)
             }
             refresh()
@@ -1625,13 +1640,10 @@ final class WindowCoordinator: ObservableObject {
         groups = groups.compactMap { group in
             if group.id == excludedGroupID { return group }
             var updated = group
-            updated.windows.removeAll { saved in
+            updated.removeWindows { saved in
                 fingerprints.contains(where: { $0.matches(saved) })
             }
             guard updated.windows.count >= 2 else { return nil }
-            if updated.ratios.count != updated.windows.count {
-                updated.ratios = Array(repeating: 1 / Double(updated.windows.count), count: updated.windows.count)
-            }
             return updated
         }
         if let activeGroupID, !groups.contains(where: { $0.id == activeGroupID }) {
@@ -1841,14 +1853,8 @@ final class WindowCoordinator: ObservableObject {
         let previouslyActiveGroupID = activeGroupID
         groups = groups.compactMap { group in
             var updated = group
-            updated.windows.removeAll { $0.matches(fingerprint) }
+            updated.removeWindows { $0.matches(fingerprint) }
             guard updated.windows.count >= 2 else { return nil }
-            if updated.ratios.count != updated.windows.count {
-                updated.ratios = Array(
-                    repeating: 1 / Double(updated.windows.count),
-                    count: updated.windows.count
-                )
-            }
             return updated
         }
         if let activeGroupID, !groups.contains(where: { $0.id == activeGroupID }) {

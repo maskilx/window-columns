@@ -355,8 +355,8 @@ struct LayoutEngineChecks {
         precondition(rc < normal)
 
         // AppVersion checks
-        precondition(AppVersion.current == "0.1.0-beta.4")
-        precondition(AppVersion.semantic == SemanticVersion(string: "0.1.0-beta.4")!)
+        precondition(AppVersion.current == "0.1.0-beta.5")
+        precondition(AppVersion.semantic == SemanticVersion(string: "0.1.0-beta.5")!)
 
         // JSON Codable roundtrip
         do {

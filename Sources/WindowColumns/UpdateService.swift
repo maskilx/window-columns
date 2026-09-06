@@ -45,7 +45,7 @@ final class UpdateService: ObservableObject {
         }
     }
 
-    private struct GitHubAsset: Decodable {
+    struct GitHubAsset: Decodable {
         let name: String
         let browserDownloadUrl: String
         let size: Int
@@ -108,14 +108,12 @@ final class UpdateService: ObservableObject {
 
                 let currentSemver = AppVersion.semantic
                 if latestSemver > currentSemver {
-                    // Look for an arm64 zip asset or general zip asset
-                    let downloadURL: URL? = {
-                        if let asset = latestRelease.assets.first(where: { $0.name.hasSuffix("-macos-arm64.zip") })
-                            ?? latestRelease.assets.first(where: { $0.name.hasSuffix(".zip") }) {
-                            return URL(string: asset.browserDownloadUrl)
-                        }
-                        return nil
-                    }()
+                    #if arch(arm64)
+                    let architecture = "arm64"
+                    #else
+                    let architecture = "x86_64"
+                    #endif
+                    let downloadURL = Self.downloadURL(from: latestRelease.assets, architecture: architecture)
 
                     let releasePageURL = URL(string: latestRelease.htmlUrl) ?? releasesWebURL
                     let dateFormatter = ISO8601DateFormatter()
@@ -146,6 +144,18 @@ final class UpdateService: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Never offer an incompatible binary or an arbitrary source ZIP.
+    static func downloadURL(from assets: [GitHubAsset], architecture: String) -> URL? {
+        for suffix in ["-macos-\(architecture).zip", "-macos-universal.zip"] {
+            for asset in assets where asset.size > 0 && asset.name.hasSuffix(suffix) {
+                if let url = URL(string: asset.browserDownloadUrl), url.scheme == "https" {
+                    return url
+                }
+            }
+        }
+        return nil
     }
 
     private func showUpToDateAlert(currentVersion: String) {
